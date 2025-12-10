@@ -5,6 +5,8 @@ const socket = io();
 let selectedStudents = new Set();
 let connectedStudents = new Map();
 let messageHistory = [];
+let lastSentNames = [];
+let lastSentAll = false;
 
 // DOM 요소들
 const connectionStatus = document.getElementById('connectionStatus');
@@ -14,6 +16,7 @@ const messageText = document.getElementById('messageText');
 const sendToAllCheckbox = document.getElementById('sendToAll');
 const sendMessageBtn = document.getElementById('sendMessageBtn');
 const recipientInfo = document.getElementById('recipientInfo');
+const recipientTooltipBtn = document.getElementById('recipientTooltipBtn');
 const messageHistoryDiv = document.getElementById('messageHistory');
 const selectAllBtn = document.getElementById('selectAllBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
@@ -54,6 +57,12 @@ function initializeEventListeners() {
     // 전체 선택/해제 버튼
     selectAllBtn.addEventListener('click', selectAllStudents);
     clearAllBtn.addEventListener('click', clearAllStudents);
+
+    // 수신자 툴팁 버튼 hover
+    recipientTooltipBtn.addEventListener('mouseenter', showRecipientTooltip);
+    recipientTooltipBtn.addEventListener('mouseleave', hideRecipientTooltip);
+    // 버튼이 포커스 이동으로도 툴팁이 잔상으로 남지 않도록 blur 처리
+    recipientTooltipBtn.addEventListener('blur', hideRecipientTooltip);
 }
 
 // 서버 연결
@@ -98,9 +107,7 @@ socket.on('student_connected', function(student) {
     // 기존 같은 학생의 다른 socket_id가 있는지 확인하고 제거
     let existingSocketId = null;
     connectedStudents.forEach((existingStudent, socketId) => {
-        if (existingStudent.student_name === student.student_name && 
-            existingStudent.class_number === student.class_number &&
-            existingStudent.student_id === student.student_id &&
+        if (existingStudent.student_name === student.student_name &&
             socketId !== student.socket_id) {
             existingSocketId = socketId;
         }
@@ -117,7 +124,7 @@ socket.on('student_connected', function(student) {
     connectedStudents.set(student.socket_id, student);
     addStudentToList(student);
     updateStudentCount();
-    showNotification(`${student.student_name} (${student.class_number}) 학생이 연결되었습니다`, 'info');
+    showNotification(`${student.student_name} 학생이 연결되었습니다`, 'info');
 });
 
 // 학생 연결 해제
@@ -127,14 +134,24 @@ socket.on('student_disconnected', function(student) {
     selectedStudents.delete(student.socket_id); // socket_id 기준으로 변경
     updateStudentCount();
     updateRecipientInfo();
-    showNotification(`${student.student_name} (${student.class_number}) 학생의 연결이 해제되었습니다`, 'warning');
+    showNotification(`${student.student_name} 학생의 연결이 해제되었습니다`, 'warning');
+});
+
+// 학생 강퇴 결과
+socket.on('kick_result', function(data) {
+    if (data.status === 'success') {
+        showNotification(`${data.student_name || '학생'}을 내보냈습니다`, 'success');
+    } else {
+        showNotification(data.message || '내보내기에 실패했습니다', 'warning');
+    }
 });
 
 // 메시지 전송 완료
 socket.on('message_sent', function(data) {
     if (data.status === 'success') {
         const message = messageText.value;
-        addToMessageHistory(message);
+        const recipientNames = lastSentNames.length ? lastSentNames : buildSelectedNames();
+        addToMessageHistory(message, recipientNames, lastSentAll);
         messageText.value = '';
         showNotification('메시지가 성공적으로 전송되었습니다', 'success');
     }
@@ -173,7 +190,6 @@ function addStudentToList(student) {
     const studentCard = document.createElement('div');
     studentCard.className = 'card student-card mb-2';
     studentCard.dataset.socketId = student.socket_id;
-    studentCard.dataset.className = student.class_number;
     studentCard.dataset.studentName = student.student_name;
     
     // 온라인 상태 확인
@@ -187,12 +203,11 @@ function addStudentToList(student) {
             <div class="d-flex justify-content-between align-items-center">
                 <div>
                     <strong>${student.student_name}</strong>
-                    <br>
-                    <small class="text-muted">${student.class_number}반${student.student_id ? ` - ${student.student_id}` : ''}</small>
                 </div>
-                <div>
+                <div class="d-flex align-items-center gap-2">
                     <i class="fas ${statusIcon}"></i>
                     <small class="${statusClass}">${statusText}</small>
+                    ${isOnline ? `<button class="btn btn-sm btn-outline-danger kick-btn"><i class="fas fa-user-slash"></i></button>` : ''}
                 </div>
             </div>
         </div>
@@ -204,6 +219,15 @@ function addStudentToList(student) {
             toggleStudentSelection(student.socket_id, this);
         }
     });
+
+    // 내보내기 버튼 이벤트
+    if (isOnline) {
+        const kickBtn = studentCard.querySelector('.kick-btn');
+        kickBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            kickStudent(student.socket_id, student.student_name);
+        });
+    }
     
     // 오프라인 학생은 클릭 비활성화
     if (!isOnline) {
@@ -244,7 +268,7 @@ function toggleStudentSelection(socketId, cardElement) {
         selectedStudents.add(socketId);
         cardElement.classList.add('selected');
     }
-    
+
     updateRecipientInfo();
 }
 
@@ -283,16 +307,82 @@ function updateStudentSelection() {
 
 // 수신자 정보 업데이트
 function updateRecipientInfo() {
+    hideRecipientTooltip();
     if (sendToAllCheckbox.checked) {
         recipientInfo.textContent = `전체 학생 (${connectedStudents.size}명)에게 전송`;
         recipientInfo.className = 'text-success';
+        recipientTooltipBtn.style.display = 'none';
     } else if (selectedStudents.size > 0) {
-        recipientInfo.textContent = `선택된 ${selectedStudents.size}명의 학생에게 전송`;
+        const selectedArray = Array.from(selectedStudents).map(id => connectedStudents.get(id)).filter(Boolean);
+        const first = selectedArray[0]?.student_name || '선택된 학생';
+        const others = selectedArray.length - 1;
+
+        if (others > 0) {
+            recipientInfo.textContent = `${first} 외 ${others}명`;
+            recipientTooltipBtn.style.display = 'inline-flex';
+        } else {
+            recipientInfo.textContent = first;
+            recipientTooltipBtn.style.display = 'none';
+        }
         recipientInfo.className = 'text-info';
     } else {
         recipientInfo.textContent = '수신자를 선택해주세요';
         recipientInfo.className = 'text-muted';
+        recipientTooltipBtn.style.display = 'none';
     }
+}
+
+function showRecipientTooltip() {
+    const selectedArray = Array.from(selectedStudents).map(id => connectedStudents.get(id)).filter(Boolean);
+    if (selectedArray.length <= 1) {
+        return;
+    }
+
+    showTooltip(recipientTooltipBtn, selectedArray.map(s => s.student_name), 'recipientTooltip');
+}
+
+function hideRecipientTooltip() {
+    hideTooltip('recipientTooltip');
+}
+
+function showTooltip(target, names, tooltipId) {
+    hideTooltip(tooltipId);
+    if (!names || names.length === 0) return;
+
+    const tooltip = document.createElement('div');
+    tooltip.id = tooltipId;
+    tooltip.className = 'recipient-tooltip shadow-sm';
+    tooltip.style.position = 'absolute';
+    tooltip.style.top = `${target.getBoundingClientRect().bottom + window.scrollY + 6}px`;
+    tooltip.style.left = `${target.getBoundingClientRect().left + window.scrollX}px`;
+    tooltip.style.background = '#fff';
+    tooltip.style.border = '1px solid rgba(0,0,0,0.1)';
+    tooltip.style.borderRadius = '6px';
+    tooltip.style.padding = '8px 12px';
+    tooltip.style.zIndex = 2000;
+    tooltip.style.maxWidth = '240px';
+    tooltip.style.maxHeight = '200px';
+    tooltip.style.overflowY = 'auto';
+
+    const list = names.map(n => `<div class="small mb-1">${n}</div>`).join('');
+    tooltip.innerHTML = list || '<div class="small text-muted">선택된 대상이 없습니다.</div>';
+
+    document.body.appendChild(tooltip);
+}
+
+function hideTooltip(tooltipId) {
+    const existing = document.getElementById(tooltipId);
+    if (existing) {
+        existing.remove();
+    }
+}
+
+// 학생 강퇴
+function kickStudent(socketId, studentName) {
+    if (!socketId) return;
+    const ok = confirm(`${studentName || '학생'}을 내보낼까요?`);
+    if (!ok) return;
+    socket.emit('kick_student', { student_socket_id: socketId });
 }
 
 // 학생 수 업데이트
@@ -310,15 +400,26 @@ function sendMessage() {
     }
     
     let recipients = [];
+    const recipientNames = [];
     
     if (sendToAllCheckbox.checked) {
         recipients = ['all'];
+        connectedStudents.forEach((student) => {
+            recipientNames.push(student.student_name);
+        });
     } else if (selectedStudents.size > 0) {
         recipients = Array.from(selectedStudents);
+        recipients.forEach((sid) => {
+            const info = connectedStudents.get(sid);
+            if (info) recipientNames.push(info.student_name);
+        });
     } else {
         showNotification('수신자를 선택해주세요', 'warning');
         return;
     }
+    
+    lastSentNames = recipientNames.slice();
+    lastSentAll = sendToAllCheckbox.checked;
     
     // 다중 교사 시스템: 교사 코드 포함하여 메시지 전송
     socket.emit('send_message', {
@@ -327,6 +428,19 @@ function sendMessage() {
         message: message,
         recipients: recipients
     });
+}
+
+function buildSelectedNames() {
+    const names = [];
+    if (sendToAllCheckbox.checked) {
+        connectedStudents.forEach((student) => names.push(student.student_name));
+    } else if (selectedStudents.size > 0) {
+        selectedStudents.forEach((sid) => {
+            const info = connectedStudents.get(sid);
+            if (info) names.push(info.student_name);
+        });
+    }
+    return names;
 }
 
 // URL을 링크로 변환하는 함수
@@ -352,18 +466,23 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 메시지 히스토리에 추가
-function addToMessageHistory(message) {
-    const timestamp = new Date().toLocaleString('ko-KR');
-    let recipients = '';
-    
-    if (sendToAllCheckbox.checked) {
-        recipients = `전체 학생 (${connectedStudents.size}명)`;
-    } else {
-        recipients = `선택된 ${selectedStudents.size}명`;
+// 수신자 라벨 포맷
+function formatRecipientLabel(names = [], isAll = false) {
+    if (isAll) {
+        return names.length > 0 ? `${names[0]} 외 ${Math.max(names.length - 1, 0)}명` : '전체 학생';
     }
+    if (!names || names.length === 0) return '수신자 없음';
+    if (names.length === 1) return names[0];
+    return `${names[0]} 외 ${names.length - 1}명`;
+}
+
+// 메시지 히스토리에 추가
+function addToMessageHistory(message, recipientNames = [], isAll = false) {
+    const timestamp = new Date().toLocaleString('ko-KR');
+    const label = formatRecipientLabel(recipientNames, isAll);
+    const hasTooltip = recipientNames.length > 1;
+    const tooltipId = `historyTooltip-${Date.now()}`;
     
-    // 메시지 내용을 안전하게 처리하고 링크 변환
     const safeMessage = escapeHtml(message);
     const messageWithLinks = convertUrlsToLinks(safeMessage);
     
@@ -371,20 +490,30 @@ function addToMessageHistory(message) {
     messageItem.className = 'message-item';
     messageItem.innerHTML = `
         <div class="d-flex justify-content-between mb-2">
-            <strong>수신자: ${escapeHtml(recipients)}</strong>
+            <div class="d-flex align-items-center gap-2">
+                <strong>수신자: ${escapeHtml(label)}</strong>
+                ${hasTooltip ? `<button class="btn btn-sm btn-outline-secondary history-tooltip-btn" data-tooltip-id="${tooltipId}" type="button"><i class="fas fa-plus"></i></button>` : ''}
+            </div>
             <small class="text-muted">${escapeHtml(timestamp)}</small>
         </div>
         <div style="word-break: break-word; line-height: 1.5;">${messageWithLinks}</div>
     `;
     
-    // 첫 번째 메시지인 경우 안내 메시지 제거
+    if (hasTooltip) {
+        const btn = messageItem.querySelector('.history-tooltip-btn');
+        const show = () => showTooltip(btn, recipientNames, tooltipId);
+        const hide = () => hideTooltip(tooltipId);
+        btn.addEventListener('mouseenter', show);
+        btn.addEventListener('mouseleave', hide);
+        btn.addEventListener('blur', hide);
+    }
+    
     if (messageHistoryDiv.innerHTML.includes('아직 전송한 메시지가 없습니다')) {
         messageHistoryDiv.innerHTML = '';
     }
     
     messageHistoryDiv.insertBefore(messageItem, messageHistoryDiv.firstChild);
     
-    // 히스토리가 너무 많아지면 오래된 것 제거 (최대 20개)
     const messageItems = messageHistoryDiv.querySelectorAll('.message-item');
     if (messageItems.length > 20) {
         messageItems[messageItems.length - 1].remove();
