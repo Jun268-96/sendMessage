@@ -1,3 +1,6 @@
+from gevent import monkey
+monkey.patch_all()
+
 from flask import Flask, render_template, request, session
 from flask_socketio import SocketIO, emit, join_room, disconnect
 import os
@@ -9,7 +12,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'teacher_student_message_system'
 
 # eventlet 대신 threading 모드로 강제해 Python 3.13 ssl 호환성 문제 회피
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 # In-memory connection tracking
 teachers = {}
