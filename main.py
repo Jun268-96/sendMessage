@@ -1,8 +1,9 @@
 from flask import Flask, render_template, request, session
 from flask_socketio import SocketIO, emit, join_room, disconnect
-import sqlite3
+import os
 import random
 from datetime import datetime
+import psycopg
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'teacher_student_message_system'
@@ -17,7 +18,12 @@ teacher_settings = {}  # teacher_code -> allow_student_messages
 
 
 def get_db():
-    return sqlite3.connect('messages.db')
+    db_url = os.environ.get('DATABASE_URL')
+    if not db_url:
+        raise RuntimeError('DATABASE_URL is not set. Please configure DATABASE_URL for Postgres.')
+    # sslmode can be configured via DB_SSLMODE if needed (e.g., require on Render)
+    sslmode = os.environ.get('DB_SSLMODE', 'prefer')
+    return psycopg.connect(db_url, sslmode=sslmode)
 
 
 def student_key(teacher_code, student_name):
@@ -29,12 +35,17 @@ def get_teacher_allow_status(teacher_code):
         return teacher_settings[teacher_code]
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT allow_student_messages FROM teacher_settings WHERE teacher_code = ?', (teacher_code,))
+    c.execute('SELECT allow_student_messages FROM teacher_settings WHERE teacher_code = %s', (teacher_code,))
     row = c.fetchone()
     if row is None:
-        c.execute('INSERT OR IGNORE INTO teacher_settings (teacher_code, allow_student_messages) VALUES (?, ?)', (teacher_code, False))
-        conn.commit()
         allow = False
+        c.execute(
+            '''INSERT INTO teacher_settings (teacher_code, allow_student_messages)
+               VALUES (%s, %s)
+               ON CONFLICT (teacher_code) DO NOTHING''',
+            (teacher_code, allow)
+        )
+        conn.commit()
     else:
         allow = bool(row[0])
     conn.close()
@@ -46,7 +57,14 @@ def set_teacher_allow_status(teacher_code, allow):
     teacher_settings[teacher_code] = bool(allow)
     conn = get_db()
     c = conn.cursor()
-    c.execute('INSERT OR REPLACE INTO teacher_settings (teacher_code, allow_student_messages, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', (teacher_code, bool(allow)))
+    c.execute(
+        '''INSERT INTO teacher_settings (teacher_code, allow_student_messages, updated_at)
+           VALUES (%s, %s, CURRENT_TIMESTAMP)
+           ON CONFLICT (teacher_code)
+           DO UPDATE SET allow_student_messages = EXCLUDED.allow_student_messages,
+                         updated_at = CURRENT_TIMESTAMP''',
+        (teacher_code, bool(allow))
+    )
     conn.commit()
     conn.close()
 
@@ -57,7 +75,7 @@ def generate_teacher_code():
         code = str(random.randint(100000, 999999))
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT teacher_code FROM teachers WHERE teacher_code = ?', (code,))
+        c.execute('SELECT teacher_code FROM teachers WHERE teacher_code = %s', (code,))
         exists = c.fetchone()
         conn.close()
         if not exists:
@@ -72,36 +90,34 @@ def init_db():
         '''CREATE TABLE IF NOT EXISTS teachers
            (teacher_code TEXT PRIMARY KEY,
             teacher_name TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_login DATETIME DEFAULT CURRENT_TIMESTAMP)'''
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP)'''
     )
 
     c.execute(
         '''CREATE TABLE IF NOT EXISTS classes
-           (id INTEGER PRIMARY KEY AUTOINCREMENT,
+           (id SERIAL PRIMARY KEY,
             teacher_code TEXT NOT NULL,
             class_number TEXT NOT NULL,
             class_name TEXT DEFAULT '',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (teacher_code) REFERENCES teachers(teacher_code),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(teacher_code, class_number))'''
     )
 
     c.execute(
         '''CREATE TABLE IF NOT EXISTS students
-           (id INTEGER PRIMARY KEY AUTOINCREMENT,
+           (id SERIAL PRIMARY KEY,
             teacher_code TEXT NOT NULL,
             class_number TEXT NOT NULL,
             student_name TEXT NOT NULL,
             student_id TEXT DEFAULT '',
-            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-            socket_id TEXT DEFAULT '',
-            FOREIGN KEY (teacher_code) REFERENCES teachers(teacher_code))'''
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            socket_id TEXT DEFAULT '')'''
     )
 
     c.execute(
         '''CREATE TABLE IF NOT EXISTS messages
-           (id INTEGER PRIMARY KEY AUTOINCREMENT,
+           (id SERIAL PRIMARY KEY,
             teacher_code TEXT NOT NULL,
             class_number TEXT,
             sender_type TEXT NOT NULL,
@@ -109,18 +125,17 @@ def init_db():
             recipient_type TEXT,
             recipient_id TEXT,
             message TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_read BOOLEAN DEFAULT FALSE,
-            FOREIGN KEY (teacher_code) REFERENCES teachers(teacher_code))'''
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_read BOOLEAN DEFAULT FALSE)'''
     )
 
     c.execute(
         '''CREATE TABLE IF NOT EXISTS hidden_messages
-           (id INTEGER PRIMARY KEY AUTOINCREMENT,
+           (id SERIAL PRIMARY KEY,
             message_id INTEGER NOT NULL,
             teacher_code TEXT NOT NULL,
             student_key TEXT NOT NULL,
-            hidden_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            hidden_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(message_id, student_key))'''
     )
 
@@ -128,7 +143,7 @@ def init_db():
         '''CREATE TABLE IF NOT EXISTS teacher_settings
            (teacher_code TEXT PRIMARY KEY,
             allow_student_messages BOOLEAN DEFAULT FALSE,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)'''
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)'''
     )
 
     c.execute(
@@ -136,7 +151,7 @@ def init_db():
            (id TEXT PRIMARY KEY,
             user_type TEXT NOT NULL,
             name TEXT NOT NULL,
-            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_online BOOLEAN DEFAULT FALSE)'''
     )
 
@@ -170,7 +185,7 @@ def teacher_register_post():
         conn = get_db()
         c = conn.cursor()
         c.execute(
-            'INSERT INTO teachers (teacher_code, teacher_name) VALUES (?, ?)',
+            'INSERT INTO teachers (teacher_code, teacher_name) VALUES (%s, %s)',
             (teacher_code, teacher_name)
         )
         conn.commit()
@@ -198,12 +213,12 @@ def teacher_login_post():
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT teacher_name FROM teachers WHERE teacher_code = ?', (teacher_code,))
+        c.execute('SELECT teacher_name FROM teachers WHERE teacher_code = %s', (teacher_code,))
         teacher = c.fetchone()
 
         if teacher:
             c.execute(
-                'UPDATE teachers SET last_login = CURRENT_TIMESTAMP WHERE teacher_code = ?',
+                'UPDATE teachers SET last_login = CURRENT_TIMESTAMP WHERE teacher_code = %s',
                 (teacher_code,)
             )
             conn.commit()
@@ -284,7 +299,7 @@ def on_teacher_join(data):
         c.execute(
             '''SELECT class_number, student_name, student_id, socket_id, last_seen
                FROM students
-               WHERE teacher_code = ?
+               WHERE teacher_code = %s
                ORDER BY student_name''',
             (teacher_code,)
         )
@@ -323,7 +338,7 @@ def on_student_join(data):
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT teacher_name FROM teachers WHERE teacher_code = ?', (teacher_code,))
+        c.execute('SELECT teacher_name FROM teachers WHERE teacher_code = %s', (teacher_code,))
         teacher = c.fetchone()
 
         if not teacher:
@@ -337,14 +352,14 @@ def on_student_join(data):
 
         c.execute(
             '''DELETE FROM students
-               WHERE teacher_code = ? AND student_name = ?''',
+               WHERE teacher_code = %s AND student_name = %s''',
             (teacher_code, student_name)
         )
 
         c.execute(
             '''INSERT INTO students
                (teacher_code, class_number, student_name, student_id, socket_id, last_seen)
-               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
+               VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)''',
             (teacher_code, class_number, student_name, student_id, request.sid)
         )
         conn.commit()
@@ -415,11 +430,11 @@ def on_get_message_history(data):
         c.execute(
             '''SELECT id, sender_type, sender_id, message, timestamp
                FROM messages
-               WHERE teacher_code = ?
-                 AND (recipient_id = 'all' OR recipient_id LIKE ?)
+               WHERE teacher_code = %s
+                 AND (recipient_id = 'all' OR recipient_id LIKE %s)
                  AND id NOT IN (
                     SELECT message_id FROM hidden_messages
-                    WHERE teacher_code = ? AND student_key = ?
+                    WHERE teacher_code = %s AND student_key = %s
                  )
                ORDER BY timestamp DESC
                LIMIT 50''',
@@ -495,19 +510,19 @@ def on_send_message(data):
             c = conn.cursor()
             c.execute(
                 '''INSERT INTO messages (teacher_code, sender_type, sender_id, recipient_type, recipient_id, message)
-                   VALUES (?, ?, ?, ?, ?, ?)''',
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   RETURNING id''',
                 (teacher_code, 'student', student_name, 'teacher', teacher_code, message)
             )
-            msg_id = c.lastrowid
-            conn.commit()
+            msg_id = c.fetchone()[0]
 
             c.execute(
                 '''DELETE FROM messages
                    WHERE id IN (
                      SELECT id FROM messages
-                     WHERE teacher_code = ? AND recipient_type = 'teacher'
+                     WHERE teacher_code = %s AND recipient_type = 'teacher'
                      ORDER BY id DESC
-                     LIMIT -1 OFFSET 1000
+                     OFFSET 1000
                    )''',
                 (teacher_code,)
             )
@@ -534,10 +549,11 @@ def save_message_multi_teacher(teacher_code, sender_type, recipient_type, recipi
     c = conn.cursor()
     c.execute(
         '''INSERT INTO messages (teacher_code, sender_type, sender_id, recipient_type, recipient_id, message)
-           VALUES (?, ?, ?, ?, ?, ?)''',
+           VALUES (%s, %s, %s, %s, %s, %s)
+           RETURNING id''',
         (teacher_code, sender_type, teacher_code, recipient_type, recipient_str, message)
     )
-    msg_id = c.lastrowid
+    msg_id = c.fetchone()[0]
     conn.commit()
     conn.close()
     return msg_id
@@ -549,7 +565,7 @@ def save_message(sender_type, sender_id, recipient_type, recipient_ids, message)
     c = conn.cursor()
     c.execute(
         '''INSERT INTO messages (teacher_code, sender_type, sender_id, recipient_type, recipient_id, message)
-           VALUES (?, ?, ?, ?, ?, ?)''',
+           VALUES (%s, %s, %s, %s, %s, %s)''',
         ('000000', sender_type, sender_id, recipient_type, recipient_str, message)
     )
     conn.commit()
@@ -571,7 +587,8 @@ def delete_message(data):
         c = conn.cursor()
         c.execute(
             '''INSERT OR IGNORE INTO hidden_messages (message_id, teacher_code, student_key)
-               VALUES (?, ?, ?)''',
+               VALUES (%s, %s, %s)
+               ON CONFLICT (message_id, student_key) DO NOTHING''',
             (message_id, teacher_code, student_key(teacher_code, student_name))
         )
         conn.commit()
@@ -599,15 +616,15 @@ def delete_message_teacher(data):
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT teacher_code FROM messages WHERE id = ?', (message_id,))
+        c.execute('SELECT teacher_code FROM messages WHERE id = %s', (message_id,))
         row = c.fetchone()
         if not row or row[0] != teacher_code:
             conn.close()
             emit('delete_result_teacher', {'status': 'error', 'message': '삭제 권한이 없거나 메시지가 없습니다.'})
             return
 
-        c.execute('DELETE FROM messages WHERE id = ?', (message_id,))
-        c.execute('DELETE FROM hidden_messages WHERE message_id = ?', (message_id,))
+        c.execute('DELETE FROM messages WHERE id = %s', (message_id,))
+        c.execute('DELETE FROM hidden_messages WHERE message_id = %s', (message_id,))
         conn.commit()
         conn.close()
 
@@ -653,7 +670,7 @@ def get_teacher_messages(data):
         c.execute(
             '''SELECT id, sender_id, message, timestamp
                FROM messages
-               WHERE teacher_code = ? AND recipient_type = 'teacher'
+               WHERE teacher_code = %s AND recipient_type = 'teacher'
                ORDER BY id DESC
                LIMIT 100''',
             (teacher_code,)
@@ -679,4 +696,6 @@ if __name__ == '__main__':
     print("서버 시작...")
     print("교사용 페이지: http://localhost:5000/teacher")
     print("학생용 페이지: http://localhost:5000/student")
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    socketio.run(app, debug=debug, host='0.0.0.0', port=port)
