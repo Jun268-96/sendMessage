@@ -1,14 +1,17 @@
 // Socket.IO 연결
 const socket = io();
 
-// 전역 변수
+// 상태
 let selectedStudents = new Set();
 let connectedStudents = new Map();
-let messageHistory = [];
 let lastSentNames = [];
 let lastSentAll = false;
+let lastMessageId = null;
+let allowStudentMessages = false;
+let sentMessages = []; // 교사 → 학생 전체 목록
+let studentMessages = []; // 학생 → 교사 전체 목록
 
-// DOM 요소들
+// DOM
 const connectionStatus = document.getElementById('connectionStatus');
 const studentCount = document.getElementById('studentCount');
 const studentList = document.getElementById('studentList');
@@ -22,73 +25,93 @@ const selectAllBtn = document.getElementById('selectAllBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
 const notificationToast = document.getElementById('notificationToast');
 const toastMessage = document.getElementById('toastMessage');
+const allowStudentMessagesToggle = document.getElementById('allowStudentMessages');
+const studentMessageHistory = document.getElementById('studentMessageHistory');
+const studentMessageStatus = document.getElementById('studentMessageStatus');
+const loadStudentMessagesBtn = document.getElementById('loadStudentMessagesBtn');
 
-// Bootstrap Toast 인스턴스
+// 모달
+let modalEl = null;
+let modalBody = null;
+let modalTitle = null;
+
 const toast = new bootstrap.Toast(notificationToast);
 
-// 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
+    initModal();
     initializeEventListeners();
     connectToServer();
 });
 
-// 이벤트 리스너 초기화
+function initModal() {
+    // 동적으로 모달 추가 (없을 경우)
+    if (!document.getElementById('logModal')) {
+        const modalHtml = `
+        <div class="modal fade" id="logModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="logModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body" id="logModalBody"></div>
+            </div>
+          </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    }
+    modalEl = new bootstrap.Modal(document.getElementById('logModal'));
+    modalBody = document.getElementById('logModalBody');
+    modalTitle = document.getElementById('logModalTitle');
+}
+
 function initializeEventListeners() {
-    // 메시지 전송 버튼
     sendMessageBtn.addEventListener('click', sendMessage);
-    
-    // 엔터키로 메시지 전송
     messageText.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && e.ctrlKey) {
-            sendMessage();
-        }
+        if (e.key === 'Enter' && e.ctrlKey) sendMessage();
     });
-    
-    // 전체 선택 체크박스
+
     sendToAllCheckbox.addEventListener('change', function() {
         updateRecipientInfo();
         if (this.checked) {
-            // 전체 선택 시 개별 선택 해제
             selectedStudents.clear();
             updateStudentSelection();
         }
     });
-    
-    // 전체 선택/해제 버튼
+
     selectAllBtn.addEventListener('click', selectAllStudents);
     clearAllBtn.addEventListener('click', clearAllStudents);
 
-    // 수신자 툴팁 버튼 hover
     recipientTooltipBtn.addEventListener('mouseenter', showRecipientTooltip);
     recipientTooltipBtn.addEventListener('mouseleave', hideRecipientTooltip);
-    // 버튼이 포커스 이동으로도 툴팁이 잔상으로 남지 않도록 blur 처리
     recipientTooltipBtn.addEventListener('blur', hideRecipientTooltip);
+
+    allowStudentMessagesToggle.addEventListener('change', function() {
+        socket.emit('teacher_toggle_receive', { allow: this.checked });
+    });
+
+    loadStudentMessagesBtn.addEventListener('click', requestTeacherMessages);
 }
 
-// 서버 연결
 function connectToServer() {
-    // 다중 교사 시스템: 세션에서 교사 정보 가져오기
-    const teacherCode = window.teacherCode; // 서버에서 전달받은 교사 코드
-    const teacherName = window.teacherName; // 서버에서 전달받은 교사 이름
-    
+    const teacherCode = window.teacherCode;
+    const teacherName = window.teacherName;
     if (!teacherCode) {
-        alert('교사 인증이 필요합니다. 로그인 페이지로 이동합니다.');
+        alert('교사 인증이 필요합니다. 로그인 해주세요.');
         window.location.href = '/teacher/login';
         return;
     }
-    
-    // 교사로 서버에 연결
     socket.emit('teacher_join', {
         teacher_code: teacherCode,
         teacher_name: teacherName
     });
 }
 
-// Socket.IO 이벤트 핸들러들
+// 소켓 이벤트
 socket.on('connect', function() {
     connectionStatus.textContent = '연결됨';
     connectionStatus.className = 'badge bg-success';
-    showNotification('서버에 연결되었습니다', 'success');
+    showNotification('서버와 연결되었습니다', 'success');
 });
 
 socket.on('disconnect', function() {
@@ -97,47 +120,28 @@ socket.on('disconnect', function() {
     showNotification('서버 연결이 끊어졌습니다', 'danger');
 });
 
-// 학생 목록 업데이트
 socket.on('student_list_update', function(students) {
     updateStudentList(students);
 });
 
-// 새 학생 연결
 socket.on('student_connected', function(student) {
-    // 기존 같은 학생의 다른 socket_id가 있는지 확인하고 제거
-    let existingSocketId = null;
-    connectedStudents.forEach((existingStudent, socketId) => {
-        if (existingStudent.student_name === student.student_name &&
-            socketId !== student.socket_id) {
-            existingSocketId = socketId;
-        }
-    });
-    
-    // 기존 학생 제거
-    if (existingSocketId) {
-        connectedStudents.delete(existingSocketId);
-        removeStudentFromList(existingSocketId);
-        selectedStudents.delete(existingSocketId);
-    }
-    
-    // 새로운 학생 추가
+    // 동일 이름으로 이전에 남아있던 카드/소켓 정보를 제거해 중복 표시를 막음
+    removeStudentByName(student.student_name);
     connectedStudents.set(student.socket_id, student);
     addStudentToList(student);
     updateStudentCount();
     showNotification(`${student.student_name} 학생이 연결되었습니다`, 'info');
 });
 
-// 학생 연결 해제
 socket.on('student_disconnected', function(student) {
     connectedStudents.delete(student.socket_id);
     removeStudentFromList(student.socket_id);
-    selectedStudents.delete(student.socket_id); // socket_id 기준으로 변경
+    selectedStudents.delete(student.socket_id);
     updateStudentCount();
     updateRecipientInfo();
     showNotification(`${student.student_name} 학생의 연결이 해제되었습니다`, 'warning');
 });
 
-// 학생 강퇴 결과
 socket.on('kick_result', function(data) {
     if (data.status === 'success') {
         showNotification(`${data.student_name || '학생'}을 내보냈습니다`, 'success');
@@ -146,24 +150,60 @@ socket.on('kick_result', function(data) {
     }
 });
 
-// 메시지 전송 완료
+socket.on('receive_status', function(data) {
+    allowStudentMessages = !!data.allow;
+    allowStudentMessagesToggle.checked = allowStudentMessages;
+    studentMessageStatus.textContent = allowStudentMessages ? '수신 중' : '수신 불가';
+    studentMessageStatus.className = allowStudentMessages ? 'badge bg-success text-white' : 'badge bg-dark text-white';
+});
+
+socket.on('new_message_from_student', function(data) {
+    studentMessages.unshift(data);
+    renderStudentPreview();
+    showNotification(`학생 메시지 도착: ${data.student_name}`, 'info');
+});
+
+socket.on('teacher_messages', function(payload) {
+    studentMessages = payload.messages || [];
+    renderStudentPreview();
+});
+
+socket.on('delete_result_teacher', function(data) {
+    if (data.status === 'success') {
+        showNotification('메시지가 삭제되었습니다', 'success');
+        sentMessages = sentMessages.filter(m => String(m.id) !== String(data.message_id));
+        renderSentPreview();
+    } else {
+        showNotification(data.message || '메시지 삭제에 실패했습니다', 'warning');
+    }
+});
+
 socket.on('message_sent', function(data) {
     if (data.status === 'success') {
         const message = messageText.value;
         const recipientNames = lastSentNames.length ? lastSentNames : buildSelectedNames();
-        addToMessageHistory(message, recipientNames, lastSentAll);
+        lastMessageId = data.message_id || null;
+        // 히스토리 배열 관리
+        const entry = {
+            id: lastMessageId,
+            label: formatRecipientLabel(recipientNames, lastSentAll),
+            recipients: recipientNames,
+            isAll: lastSentAll,
+            message: message,
+            timestamp: new Date().toLocaleString('ko-KR')
+        };
+        sentMessages.unshift(entry);
+        if (sentMessages.length > 200) sentMessages = sentMessages.slice(0, 200);
+        renderSentPreview();
         messageText.value = '';
         showNotification('메시지가 성공적으로 전송되었습니다', 'success');
     }
 });
 
-// 학생 목록 업데이트
+// 학생 목록
 function updateStudentList(students) {
     connectedStudents.clear();
-    students.forEach(student => {
-        connectedStudents.set(student.socket_id, student);
-    });
-    
+    students.forEach(student => connectedStudents.set(student.socket_id, student));
     if (students.length === 0) {
         studentList.innerHTML = `
             <div class="text-center text-muted p-3">
@@ -173,37 +213,24 @@ function updateStudentList(students) {
         `;
     } else {
         studentList.innerHTML = '';
-        students.forEach(student => {
-            addStudentToList(student);
-        });
+        students.forEach(addStudentToList);
     }
-    
     updateStudentCount();
 }
 
-// 학생을 목록에 추가
 function addStudentToList(student) {
-    if (connectedStudents.size === 1 && studentList.innerHTML.includes('아직 연결된 학생이 없습니다')) {
-        studentList.innerHTML = '';
-    }
-    
-    const studentCard = document.createElement('div');
-    studentCard.className = 'card student-card mb-2';
-    studentCard.dataset.socketId = student.socket_id;
-    studentCard.dataset.studentName = student.student_name;
-    
-    // 온라인 상태 확인
-    const isOnline = student.is_online !== false; // 기본값 true
+    const isOnline = student.is_online !== false;
+    const card = document.createElement('div');
+    card.className = 'card student-card mb-2';
+    card.dataset.socketId = student.socket_id;
+    card.dataset.studentName = student.student_name;
     const statusIcon = isOnline ? 'fa-circle status-online' : 'fa-circle status-offline';
     const statusText = isOnline ? '온라인' : '오프라인';
     const statusClass = isOnline ? 'text-success' : 'text-muted';
-    
-    studentCard.innerHTML = `
+    card.innerHTML = `
         <div class="card-body p-2">
             <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <strong>${student.student_name}</strong>
-                </div>
+                <div><strong>${student.student_name}</strong></div>
                 <div class="d-flex align-items-center gap-2">
                     <i class="fas ${statusIcon}"></i>
                     <small class="${statusClass}">${statusText}</small>
@@ -212,39 +239,34 @@ function addStudentToList(student) {
             </div>
         </div>
     `;
-    
-    // 클릭 이벤트 추가 (socket_id 기준으로 변경)
-    studentCard.addEventListener('click', function() {
-        if (isOnline) {
-            toggleStudentSelection(student.socket_id, this);
-        }
-    });
-
-    // 내보내기 버튼 이벤트
+    card.addEventListener('click', () => { if (isOnline) toggleStudentSelection(student.socket_id, card); });
     if (isOnline) {
-        const kickBtn = studentCard.querySelector('.kick-btn');
-        kickBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            kickStudent(student.socket_id, student.student_name);
-        });
+        const kickBtn = card.querySelector('.kick-btn');
+        kickBtn.addEventListener('click', (e) => { e.stopPropagation(); kickStudent(student.socket_id, student.student_name); });
+    } else {
+        card.style.opacity = '0.6'; card.style.cursor = 'not-allowed';
     }
-    
-    // 오프라인 학생은 클릭 비활성화
-    if (!isOnline) {
-        studentCard.style.opacity = '0.6';
-        studentCard.style.cursor = 'not-allowed';
-    }
-    
-    studentList.appendChild(studentCard);
+    studentList.appendChild(card);
 }
 
-// 학생을 목록에서 제거
-function removeStudentFromList(socketId) {
-    const studentCard = document.querySelector(`[data-socket-id="${socketId}"]`);
-    if (studentCard) {
-        studentCard.remove();
+// 동일 이름의 학생이 이전 소켓으로 남아 있으면 제거 (재접속 시 중복 카드 방지)
+function removeStudentByName(studentName) {
+    for (const [sid, info] of connectedStudents.entries()) {
+        if (info && info.student_name === studentName) {
+            connectedStudents.delete(sid);
+        }
     }
-    
+    const selector = `[data-student-name="${CSS.escape(studentName)}"]`;
+    let card = document.querySelector(selector);
+    while (card) {
+        card.remove();
+        card = document.querySelector(selector);
+    }
+}
+
+function removeStudentFromList(socketId) {
+    const card = document.querySelector(`[data-socket-id="${socketId}"]`);
+    if (card) card.remove();
     if (connectedStudents.size === 0) {
         studentList.innerHTML = `
             <div class="text-center text-muted p-3">
@@ -255,12 +277,9 @@ function removeStudentFromList(socketId) {
     }
 }
 
-// 학생 선택 토글 (socket_id 기준으로 변경)
+// 선택/토글
 function toggleStudentSelection(socketId, cardElement) {
-    if (sendToAllCheckbox.checked) {
-        sendToAllCheckbox.checked = false;
-    }
-    
+    if (sendToAllCheckbox.checked) sendToAllCheckbox.checked = false;
     if (selectedStudents.has(socketId)) {
         selectedStudents.delete(socketId);
         cardElement.classList.remove('selected');
@@ -268,44 +287,30 @@ function toggleStudentSelection(socketId, cardElement) {
         selectedStudents.add(socketId);
         cardElement.classList.add('selected');
     }
-
     updateRecipientInfo();
 }
-
-// 전체 학생 선택
 function selectAllStudents() {
     sendToAllCheckbox.checked = false;
     selectedStudents.clear();
     connectedStudents.forEach((student, socketId) => {
-        if (student.is_online !== false) { // 온라인 학생만 선택
-            selectedStudents.add(socketId);
-        }
+        if (student.is_online !== false) selectedStudents.add(socketId);
     });
     updateStudentSelection();
     updateRecipientInfo();
 }
-
-// 전체 선택 해제
 function clearAllStudents() {
     sendToAllCheckbox.checked = false;
     selectedStudents.clear();
     updateStudentSelection();
     updateRecipientInfo();
 }
-
-// 학생 선택 상태 업데이트
 function updateStudentSelection() {
     document.querySelectorAll('.student-card').forEach(card => {
-        const socketId = card.dataset.socketId;
-        if (selectedStudents.has(socketId)) {
-            card.classList.add('selected');
-        } else {
-            card.classList.remove('selected');
-        }
+        card.classList.toggle('selected', selectedStudents.has(card.dataset.socketId));
     });
 }
 
-// 수신자 정보 업데이트
+// 수신자 표시
 function updateRecipientInfo() {
     hideRecipientTooltip();
     if (sendToAllCheckbox.checked) {
@@ -316,7 +321,6 @@ function updateRecipientInfo() {
         const selectedArray = Array.from(selectedStudents).map(id => connectedStudents.get(id)).filter(Boolean);
         const first = selectedArray[0]?.student_name || '선택된 학생';
         const others = selectedArray.length - 1;
-
         if (others > 0) {
             recipientInfo.textContent = `${first} 외 ${others}명`;
             recipientTooltipBtn.style.display = 'inline-flex';
@@ -331,24 +335,64 @@ function updateRecipientInfo() {
         recipientTooltipBtn.style.display = 'none';
     }
 }
-
 function showRecipientTooltip() {
-    const selectedArray = Array.from(selectedStudents).map(id => connectedStudents.get(id)).filter(Boolean);
-    if (selectedArray.length <= 1) {
+    const arr = Array.from(selectedStudents).map(id => connectedStudents.get(id)).filter(Boolean);
+    if (arr.length <= 1) return;
+    showTooltip(recipientTooltipBtn, arr.map(s => s.student_name), 'recipientTooltip');
+}
+function hideRecipientTooltip() { hideTooltip('recipientTooltip'); }
+
+// 학생 수
+function updateStudentCount() { studentCount.textContent = connectedStudents.size; }
+
+// 전송 (교사→학생)
+function sendMessage() {
+    const message = messageText.value.trim();
+    if (!message) { showNotification('메시지를 입력해주세요', 'warning'); return; }
+    let recipients = [];
+    const recipientNames = [];
+    if (sendToAllCheckbox.checked) {
+        recipients = ['all'];
+        connectedStudents.forEach((student) => recipientNames.push(student.student_name));
+    } else if (selectedStudents.size > 0) {
+        recipients = Array.from(selectedStudents);
+        recipients.forEach((sid) => {
+            const info = connectedStudents.get(sid);
+            if (info) recipientNames.push(info.student_name);
+        });
+    } else {
+        showNotification('수신자를 선택해주세요', 'warning');
         return;
     }
-
-    showTooltip(recipientTooltipBtn, selectedArray.map(s => s.student_name), 'recipientTooltip');
+    lastSentNames = recipientNames.slice();
+    lastSentAll = sendToAllCheckbox.checked;
+    socket.emit('send_message', {
+        sender_type: 'teacher',
+        teacher_code: window.teacherCode,
+        message: message,
+        recipients: recipients
+    });
 }
 
-function hideRecipientTooltip() {
-    hideTooltip('recipientTooltip');
+// 학생 강퇴
+function kickStudent(socketId, studentName) {
+    if (!socketId) return;
+    const ok = confirm(`${studentName || '학생'}을 내보낼까요?`);
+    if (!ok) return;
+    socket.emit('kick_student', { student_socket_id: socketId });
+}
+
+// 유틸
+function formatRecipientLabel(names = [], isAll = false) {
+    if (isAll) return names.length > 0 ? `${names[0]} 외 ${Math.max(names.length - 1, 0)}명` : '전체 학생';
+    if (!names || names.length === 0) return '수신자 없음';
+    if (names.length === 1) return names[0];
+    return `${names[0]} 외 ${names.length - 1}명`;
 }
 
 function showTooltip(target, names, tooltipId) {
     hideTooltip(tooltipId);
     if (!names || names.length === 0) return;
-
     const tooltip = document.createElement('div');
     tooltip.id = tooltipId;
     tooltip.className = 'recipient-tooltip shadow-sm';
@@ -363,174 +407,124 @@ function showTooltip(target, names, tooltipId) {
     tooltip.style.maxWidth = '240px';
     tooltip.style.maxHeight = '200px';
     tooltip.style.overflowY = 'auto';
-
-    const list = names.map(n => `<div class="small mb-1">${n}</div>`).join('');
-    tooltip.innerHTML = list || '<div class="small text-muted">선택된 대상이 없습니다.</div>';
-
+    tooltip.innerHTML = names.map(n => `<div class="small mb-1">${n}</div>`).join('');
     document.body.appendChild(tooltip);
 }
-
 function hideTooltip(tooltipId) {
     const existing = document.getElementById(tooltipId);
-    if (existing) {
-        existing.remove();
-    }
+    if (existing) existing.remove();
 }
 
-// 학생 강퇴
-function kickStudent(socketId, studentName) {
-    if (!socketId) return;
-    const ok = confirm(`${studentName || '학생'}을 내보낼까요?`);
-    if (!ok) return;
-    socket.emit('kick_student', { student_socket_id: socketId });
-}
-
-// 학생 수 업데이트
-function updateStudentCount() {
-    studentCount.textContent = connectedStudents.size;
-}
-
-// 메시지 전송
-function sendMessage() {
-    const message = messageText.value.trim();
-    
-    if (!message) {
-        showNotification('메시지를 입력해주세요', 'warning');
-        return;
-    }
-    
-    let recipients = [];
-    const recipientNames = [];
-    
-    if (sendToAllCheckbox.checked) {
-        recipients = ['all'];
-        connectedStudents.forEach((student) => {
-            recipientNames.push(student.student_name);
-        });
-    } else if (selectedStudents.size > 0) {
-        recipients = Array.from(selectedStudents);
-        recipients.forEach((sid) => {
-            const info = connectedStudents.get(sid);
-            if (info) recipientNames.push(info.student_name);
-        });
+// 교사 전송 기록: 프리뷰 3개 + 더보기 모달
+function renderSentPreview() {
+    const preview = sentMessages.slice(0, 3);
+    if (preview.length === 0) {
+        messageHistoryDiv.innerHTML = `
+            <div class="text-center text-muted p-3">
+                <i class="fas fa-envelope fa-2x mb-2"></i>
+                <p>아직 전송한 메시지가 없습니다</p>
+            </div>
+        `;
     } else {
-        showNotification('수신자를 선택해주세요', 'warning');
-        return;
-    }
-    
-    lastSentNames = recipientNames.slice();
-    lastSentAll = sendToAllCheckbox.checked;
-    
-    // 다중 교사 시스템: 교사 코드 포함하여 메시지 전송
-    socket.emit('send_message', {
-        sender_type: 'teacher',
-        teacher_code: window.teacherCode, // 교사 코드 추가
-        message: message,
-        recipients: recipients
-    });
-}
-
-function buildSelectedNames() {
-    const names = [];
-    if (sendToAllCheckbox.checked) {
-        connectedStudents.forEach((student) => names.push(student.student_name));
-    } else if (selectedStudents.size > 0) {
-        selectedStudents.forEach((sid) => {
-            const info = connectedStudents.get(sid);
-            if (info) names.push(info.student_name);
+        messageHistoryDiv.innerHTML = '';
+        preview.forEach(msg => {
+            const item = document.createElement('div');
+            item.className = 'message-item';
+            item.innerHTML = `
+                <div class="d-flex justify-content-between mb-2">
+                    <strong>수신자: ${escapeHtml(msg.label)}</strong>
+                    <small class="text-muted">${escapeHtml(msg.timestamp)}</small>
+                </div>
+                <div style="word-break: break-word; line-height: 1.5;">${convertUrlsToLinks(escapeHtml(msg.message))}</div>
+            `;
+            messageHistoryDiv.appendChild(item);
         });
     }
-    return names;
+    // 더보기 버튼
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-outline-primary btn-sm mt-2';
+    btn.textContent = '더보기';
+    btn.addEventListener('click', () => openModal('전송 기록', sentMessages, true));
+    messageHistoryDiv.appendChild(btn);
 }
 
-// URL을 링크로 변환하는 함수
+// 학생 → 교사: 프리뷰 3개 + 모달
+function renderStudentPreview() {
+    const preview = studentMessages.slice(0, 3);
+    if (preview.length === 0) {
+        studentMessageHistory.innerHTML = `
+            <div class="text-center text-muted p-3">
+                <i class="fas fa-comment-dots fa-2x mb-2"></i>
+                <p>아직 받은 학생 메시지가 없습니다</p>
+            </div>
+        `;
+    } else {
+        studentMessageHistory.innerHTML = '';
+        preview.forEach(prependStudentMessage);
+    }
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-outline-primary btn-sm mt-2';
+    btn.textContent = '더보기';
+    btn.addEventListener('click', () => openModal('학생 메시지', studentMessages, false));
+    studentMessageHistory.appendChild(btn);
+}
+
+// 학생 메시지 전체 조회 요청
+function requestTeacherMessages() {
+    socket.emit('get_teacher_messages', {});
+}
+
+// 학생 메시지 카드를 추가하는 헬퍼
+function prependStudentMessage(msg) {
+    const container = studentMessageHistory;
+    const item = document.createElement('div');
+    item.className = 'message-item mb-2';
+    const safeMsg = escapeHtml(msg.message || '');
+    item.innerHTML = `
+        <div class="d-flex justify-content-between mb-2">
+            <strong>${escapeHtml(msg.student_name || '학생')}</strong>
+            <small class="text-muted">${escapeHtml(msg.timestamp || '')}</small>
+        </div>
+        <div style="word-break: break-word; line-height: 1.5;">${convertUrlsToLinks(safeMsg)}</div>
+    `;
+    container.appendChild(item);
+}
+
+function openModal(title, items, isSent) {
+    modalTitle.textContent = title;
+    if (!items || items.length === 0) {
+        modalBody.innerHTML = '<p class="text-muted">기록이 없습니다.</p>';
+    } else {
+        modalBody.innerHTML = items.map(msg => {
+            const senderLabel = isSent ? `수신자: ${escapeHtml(msg.label || '')}` : `${escapeHtml(msg.student_name || '학생')}`;
+            const ts = escapeHtml(msg.timestamp || '');
+            const body = escapeHtml(msg.message || '');
+            return `
+                <div class="message-item mb-2">
+                    <div class="d-flex justify-content-between mb-2">
+                        <strong>${senderLabel}</strong>
+                        <small class="text-muted">${ts}</small>
+                    </div>
+                    <div style="word-break: break-word; line-height: 1.5;">${convertUrlsToLinks(body)}</div>
+                </div>`;
+        }).join('');
+    }
+    modalEl.show();
+}
+
+// 메시지 저장/알림
 function convertUrlsToLinks(text) {
-    // URL 패턴 정규식 (http, https, www로 시작하는 URL 감지)
     const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
-    
     return text.replace(urlPattern, function(url) {
         let href = url;
-        // www로 시작하는 경우 http:// 추가
-        if (url.startsWith('www.')) {
-            href = 'http://' + url;
-        }
-        
+        if (url.startsWith('www.')) href = 'http://' + url;
         return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-primary text-decoration-underline">${url}</a>`;
     });
 }
-
-// 텍스트를 안전하게 HTML로 변환 (XSS 방지)
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// 수신자 라벨 포맷
-function formatRecipientLabel(names = [], isAll = false) {
-    if (isAll) {
-        return names.length > 0 ? `${names[0]} 외 ${Math.max(names.length - 1, 0)}명` : '전체 학생';
-    }
-    if (!names || names.length === 0) return '수신자 없음';
-    if (names.length === 1) return names[0];
-    return `${names[0]} 외 ${names.length - 1}명`;
-}
-
-// 메시지 히스토리에 추가
-function addToMessageHistory(message, recipientNames = [], isAll = false) {
-    const timestamp = new Date().toLocaleString('ko-KR');
-    const label = formatRecipientLabel(recipientNames, isAll);
-    const hasTooltip = recipientNames.length > 1;
-    const tooltipId = `historyTooltip-${Date.now()}`;
-    
-    const safeMessage = escapeHtml(message);
-    const messageWithLinks = convertUrlsToLinks(safeMessage);
-    
-    const messageItem = document.createElement('div');
-    messageItem.className = 'message-item';
-    messageItem.innerHTML = `
-        <div class="d-flex justify-content-between mb-2">
-            <div class="d-flex align-items-center gap-2">
-                <strong>수신자: ${escapeHtml(label)}</strong>
-                ${hasTooltip ? `<button class="btn btn-sm btn-outline-secondary history-tooltip-btn" data-tooltip-id="${tooltipId}" type="button"><i class="fas fa-plus"></i></button>` : ''}
-            </div>
-            <small class="text-muted">${escapeHtml(timestamp)}</small>
-        </div>
-        <div style="word-break: break-word; line-height: 1.5;">${messageWithLinks}</div>
-    `;
-    
-    if (hasTooltip) {
-        const btn = messageItem.querySelector('.history-tooltip-btn');
-        const show = () => showTooltip(btn, recipientNames, tooltipId);
-        const hide = () => hideTooltip(tooltipId);
-        btn.addEventListener('mouseenter', show);
-        btn.addEventListener('mouseleave', hide);
-        btn.addEventListener('blur', hide);
-    }
-    
-    if (messageHistoryDiv.innerHTML.includes('아직 전송한 메시지가 없습니다')) {
-        messageHistoryDiv.innerHTML = '';
-    }
-    
-    messageHistoryDiv.insertBefore(messageItem, messageHistoryDiv.firstChild);
-    
-    const messageItems = messageHistoryDiv.querySelectorAll('.message-item');
-    if (messageItems.length > 20) {
-        messageItems[messageItems.length - 1].remove();
-    }
-}
-
-// 알림 표시
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
 function showNotification(message, type = 'info') {
-    const bgClass = {
-        'success': 'bg-success',
-        'info': 'bg-info',
-        'warning': 'bg-warning',
-        'danger': 'bg-danger'
-    };
-    
+    const bgClass = { 'success': 'bg-success', 'info': 'bg-info', 'warning': 'bg-warning', 'danger': 'bg-danger' };
     toastMessage.textContent = message;
     notificationToast.className = `toast ${bgClass[type] || 'bg-info'} text-white`;
-    
     toast.show();
-} 
+}

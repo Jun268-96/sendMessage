@@ -7,11 +7,14 @@ from datetime import datetime
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'teacher_student_message_system'
 
-socketio = SocketIO(app, cors_allowed_origins="*")
+# eventlet 대신 threading 모드로 강제해 Python 3.13 ssl 호환성 문제 회피
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # In-memory connection tracking
 teachers = {}
 students = {}
+teacher_settings = {}  # teacher_code -> allow_student_messages
+teacher_settings = {}  # teacher_code -> allow_student_messages
 
 
 def get_db():
@@ -96,6 +99,13 @@ def init_db():
     )
 
     c.execute(
+        '''CREATE TABLE IF NOT EXISTS teacher_settings
+           (teacher_code TEXT PRIMARY KEY,
+            allow_student_messages BOOLEAN DEFAULT FALSE,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)'''
+    )
+
+    c.execute(
         '''CREATE TABLE IF NOT EXISTS users
            (id TEXT PRIMARY KEY,
             user_type TEXT NOT NULL,
@@ -104,6 +114,34 @@ def init_db():
             is_online BOOLEAN DEFAULT FALSE)'''
     )
 
+    conn.commit()
+    conn.close()
+
+
+def get_teacher_allow_status(teacher_code):
+    if teacher_code in teacher_settings:
+        return teacher_settings[teacher_code]
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT allow_student_messages FROM teacher_settings WHERE teacher_code = ?', (teacher_code,))
+    row = c.fetchone()
+    if row is None:
+        # 기본값 False로 삽입
+        c.execute('INSERT OR IGNORE INTO teacher_settings (teacher_code, allow_student_messages) VALUES (?, ?)', (teacher_code, False))
+        conn.commit()
+        allow = False
+    else:
+        allow = bool(row[0])
+    conn.close()
+    teacher_settings[teacher_code] = allow
+    return allow
+
+
+def set_teacher_allow_status(teacher_code, allow):
+    teacher_settings[teacher_code] = bool(allow)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO teacher_settings (teacher_code, allow_student_messages, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', (teacher_code, bool(allow)))
     conn.commit()
     conn.close()
 
@@ -237,8 +275,13 @@ def on_teacher_join(data):
         'socket_id': request.sid
     }
 
+    # 수신 허용 상태 로드
+    allow_messages = get_teacher_allow_status(teacher_code)
+
     teacher_room = f'teacher_{teacher_code}'
     join_room(teacher_room)
+
+    allow_messages = get_teacher_allow_status(teacher_code)
 
     try:
         conn = get_db()
@@ -273,6 +316,11 @@ def on_teacher_join(data):
     except Exception as e:
         print(f'교사 연결 오류: {e}')
         emit('student_list_update', [])
+
+    emit('receive_status', {'allow': allow_messages})
+
+    # 현재 수신 허용 상태 전달
+    emit('receive_status', {'allow': allow_messages})
 
 
 @socketio.on('student_join')
@@ -325,10 +373,13 @@ def on_student_join(data):
         student_room = f'students_{teacher_code}'
         join_room(student_room)
 
+        allow_messages = get_teacher_allow_status(teacher_code)
+
         emit('student_join_success', {
             'status': 'success',
             'student_info': student_info,
-            'teacher_name': teacher_name
+            'teacher_name': teacher_name,
+            'allow_messages': allow_messages
         })
 
         socketio.emit('student_connected', student_info, room=teacher_room)
@@ -397,6 +448,40 @@ def on_get_message_history(data):
     except Exception as e:
         print(f'메시지 조회 오류: {e}')
         emit('message_history', {'messages': []})
+
+
+@socketio.on('get_teacher_messages')
+def get_teacher_messages(data):
+    teacher_info = teachers.get(request.sid)
+    if not teacher_info:
+        emit('teacher_messages', {'messages': []})
+        return
+    teacher_code = teacher_info.get('teacher_code')
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute(
+            '''SELECT id, sender_id, message, timestamp
+               FROM messages
+               WHERE teacher_code = ? AND recipient_type = 'teacher'
+               ORDER BY id DESC
+               LIMIT 100''',
+            (teacher_code,)
+        )
+        rows = c.fetchall()
+        conn.close()
+        msgs = []
+        for row in rows:
+            msgs.append({
+                'id': row[0],
+                'student_name': row[1],
+                'message': row[2],
+                'timestamp': row[3]
+            })
+        emit('teacher_messages', {'messages': msgs})
+    except Exception as e:
+        print(f'교사 메시지 조회 오류: {e}')
+        emit('teacher_messages', {'messages': []})
 
 
 @socketio.on('send_message')
@@ -496,6 +581,113 @@ def delete_message(data):
     except Exception as e:
         print(f'메시지 삭제 오류: {e}')
         emit('delete_result', {'status': 'error', 'message': '삭제 중 오류가 발생했습니다.'})
+
+
+@socketio.on('delete_message_teacher')
+def delete_message_teacher(data):
+    teacher_info = teachers.get(request.sid)
+    if not teacher_info:
+        emit('delete_result_teacher', {'status': 'error', 'message': '교사 인증에 실패했습니다.'})
+        return
+
+    message_id = data.get('message_id')
+    teacher_code = teacher_info.get('teacher_code')
+
+    if not message_id:
+        emit('delete_result_teacher', {'status': 'error', 'message': '메시지 ID가 없습니다.'})
+        return
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT teacher_code FROM messages WHERE id = ?', (message_id,))
+        row = c.fetchone()
+        if not row or row[0] != teacher_code:
+            conn.close()
+            emit('delete_result_teacher', {'status': 'error', 'message': '삭제 권한이 없거나 메시지가 없습니다.'})
+            return
+
+        c.execute('DELETE FROM messages WHERE id = ?', (message_id,))
+        c.execute('DELETE FROM hidden_messages WHERE message_id = ?', (message_id,))
+        conn.commit()
+        conn.close()
+
+        # 해당 교사의 학생들에게 메시지 삭제 브로드캐스트
+        student_room = f'students_{teacher_code}'
+        socketio.emit('message_deleted', {'message_id': message_id}, room=student_room)
+
+        emit('delete_result_teacher', {'status': 'success', 'message_id': message_id})
+    except Exception as e:
+        print(f'교사용 메시지 삭제 오류: {e}')
+        emit('delete_result_teacher', {'status': 'error', 'message': '삭제 중 오류가 발생했습니다.'})
+
+
+@socketio.on('teacher_toggle_receive')
+def teacher_toggle_receive(data):
+    teacher_info = teachers.get(request.sid)
+    if not teacher_info:
+        emit('receive_status', {'allow': False})
+        return
+    allow = bool(data.get('allow'))
+    teacher_code = teacher_info.get('teacher_code')
+    set_teacher_allow_status(teacher_code, allow)
+    # 본인에게 상태 반영
+    emit('receive_status', {'allow': allow})
+    # 학생들에게도 브로드캐스트
+    student_room = f'students_{teacher_code}'
+    socketio.emit('receive_status', {'allow': allow}, room=student_room)
+
+
+@socketio.on('student_send_message')
+def student_send_message(data):
+    teacher_code = data.get('teacher_code')
+    student_name = data.get('student_name') or '학생'
+    message = data.get('message', '').strip()
+
+    if not message:
+        emit('student_message_error', {'message': '메시지를 입력해주세요.'})
+        return
+
+    if not get_teacher_allow_status(teacher_code):
+        emit('student_message_error', {'message': '교사가 현재 메시지 수신을 허용하지 않습니다.'})
+        return
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute(
+            '''INSERT INTO messages (teacher_code, sender_type, sender_id, recipient_type, recipient_id, message)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (teacher_code, 'student', student_name, 'teacher', teacher_code, message)
+        )
+        msg_id = c.lastrowid
+        conn.commit()
+
+        c.execute(
+            '''DELETE FROM messages
+               WHERE id IN (
+                 SELECT id FROM messages
+                 WHERE teacher_code = ? AND recipient_type = 'teacher'
+                 ORDER BY id DESC
+                 LIMIT -1 OFFSET 1000
+               )''',
+            (teacher_code,)
+        )
+        conn.commit()
+        conn.close()
+
+        teacher_room = f'teacher_{teacher_code}'
+        socketio.emit('new_message_from_student', {
+            'id': msg_id,
+            'student_name': student_name,
+            'message': message,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, room=teacher_room)
+
+        emit('student_message_sent', {'status': 'success', 'message_id': msg_id})
+    except Exception as e:
+        print(f'학생 메시지 전송 오류: {e}')
+        emit('student_message_error', {'message': '메시지 전송 중 오류가 발생했습니다.'})
 
 
 if __name__ == '__main__':

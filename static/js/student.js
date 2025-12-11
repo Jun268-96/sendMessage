@@ -1,16 +1,10 @@
 // Socket.IO 연결
 const socket = io();
 
-// 상태 변수
-let studentInfo = {
-    teacherCode: '',
-    name: '',
-    teacherName: '',
-    connected: false
-};
+let studentInfo = { teacherCode: '', name: '', teacherName: '', connected: false };
 let messages = [];
 
-// DOM 참조
+// DOM
 const connectionStatus = document.getElementById('connectionStatus');
 const loginScreen = document.getElementById('loginScreen');
 const messageScreen = document.getElementById('messageScreen');
@@ -26,38 +20,35 @@ const markAllReadBtn = document.getElementById('markAllReadBtn');
 const clearMessagesBtn = document.getElementById('clearMessagesBtn');
 const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
 const notificationSound = document.getElementById('notificationSound');
+const studentSendCard = document.getElementById('studentSendCard');
+const studentMessageInput = document.getElementById('studentMessageInput');
+const sendToTeacherBtn = document.getElementById('sendToTeacherBtn');
+const sendStatus = document.getElementById('sendStatus');
 
-// 초기화
 document.addEventListener('DOMContentLoaded', () => {
-    initializeEventListeners();
+    initEvents();
     loadStoredData();
     setupPWA();
 });
 
-function initializeEventListeners() {
+function initEvents() {
     connectBtn.addEventListener('click', connectToServer);
     disconnectBtn.addEventListener('click', disconnectFromServer);
 
-    teacherCodeInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            studentNameInput.focus();
-        }
-    });
-    studentNameInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            connectToServer();
-        }
-    });
-
-    teacherCodeInput.addEventListener('input', function () {
-        this.value = this.value.replace(/[^0-9]/g, '');
-    });
+    teacherCodeInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') studentNameInput.focus(); });
+    studentNameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') connectToServer(); });
+    teacherCodeInput.addEventListener('input', function() { this.value = this.value.replace(/[^0-9]/g, ''); });
 
     markAllReadBtn.addEventListener('click', markAllMessagesRead);
     clearMessagesBtn.addEventListener('click', clearAllMessages);
     refreshHistoryBtn.addEventListener('click', requestMessageHistory);
 
-    document.addEventListener('visibilitychange', () => {
+    sendToTeacherBtn.addEventListener('click', sendMessageToTeacher);
+    studentMessageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && e.ctrlKey) sendMessageToTeacher();
+    });
+
+    document.addEventListener('visibilitychange', function() {
         if (!document.hidden && studentInfo.connected) {
             setTimeout(markVisibleMessagesRead, 500);
         }
@@ -74,23 +65,17 @@ function loadStoredData() {
         studentInfo.name = data.name || '';
         studentInfo.teacherName = data.teacherName || '';
     }
-
     const storedMessages = localStorage.getItem('studentMessages');
     if (storedMessages) {
         messages = JSON.parse(storedMessages);
-        if (messages.length > 0) {
-            displayMessages();
-        }
+        if (messages.length > 0) displayMessages();
     }
 }
 
 function setupPWA() {
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/static/sw.js').catch((error) => {
-            console.log('Service worker registration failed:', error);
-        });
+        navigator.serviceWorker.register('/static/sw.js').catch(() => {});
     }
-
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
     }
@@ -100,29 +85,11 @@ function setupPWA() {
 function connectToServer() {
     const teacherCode = teacherCodeInput.value.trim();
     const name = studentNameInput.value.trim();
+    if (!teacherCode) { showFloatingNotification('교사 코드를 입력해주세요', 'warning'); teacherCodeInput.focus(); return; }
+    if (teacherCode.length !== 6 || !/^\d{6}$/.test(teacherCode)) { showFloatingNotification('교사 코드는 6자리 숫자입니다', 'warning'); teacherCodeInput.focus(); return; }
+    if (!name) { showFloatingNotification('이름을 입력해주세요', 'warning'); studentNameInput.focus(); return; }
 
-    if (!teacherCode) {
-        showFloatingNotification('교사 코드를 입력해주세요', 'warning');
-        teacherCodeInput.focus();
-        return;
-    }
-    if (teacherCode.length !== 6 || !/^\d{6}$/.test(teacherCode)) {
-        showFloatingNotification('교사 코드는 6자리 숫자여야 합니다', 'warning');
-        teacherCodeInput.focus();
-        return;
-    }
-    if (!name) {
-        showFloatingNotification('이름을 입력해주세요', 'warning');
-        studentNameInput.focus();
-        return;
-    }
-
-    studentInfo = {
-        teacherCode,
-        name,
-        teacherName: '',
-        connected: false
-    };
+    studentInfo = { teacherCode, name, teacherName: '', connected: false };
     localStorage.setItem('studentInfo', JSON.stringify(studentInfo));
 
     socket.emit('student_join', {
@@ -140,7 +107,7 @@ function disconnectFromServer() {
     }
 }
 
-// Socket.IO 이벤트
+// 소켓 이벤트
 socket.on('connect', () => {
     connectionStatus.textContent = '연결됨';
     connectionStatus.className = 'badge bg-success fs-6';
@@ -155,6 +122,7 @@ socket.on('student_join_success', (data) => {
 
         showMessageScreen();
         showFloatingNotification(`${data.teacher_name} 선생님과 연결되었습니다`, 'success');
+        updateSendToTeacherUI(data.allow_messages);
         requestMessageHistory();
     }
 });
@@ -163,33 +131,37 @@ socket.on('student_join_error', (data) => {
     showFloatingNotification(data.error || '연결에 실패했습니다', 'error');
 });
 
+socket.on('receive_status', (data) => {
+    updateSendToTeacherUI(!!data.allow);
+});
+
+socket.on('student_message_sent', (data) => {
+    showFloatingNotification('교사에게 메시지를 보냈습니다', 'success');
+    studentMessageInput.value = '';
+});
+
+socket.on('student_message_error', (data) => {
+    showFloatingNotification(data.message || '메시지 전송에 실패했습니다', 'warning');
+});
+
 socket.on('message_history', (data) => {
-    if (data.messages && data.messages.length > 0) {
-        data.messages.forEach((serverMessage) => {
-            const mid = serverMessage.id || Date.now() + Math.random();
-            const message = {
-                id: mid,
-                sender: serverMessage.sender,
-                message: serverMessage.message,
-                timestamp: serverMessage.timestamp,
-                isRead: true,
-                receivedAt: serverMessage.timestamp,
-                isFromHistory: true
-            };
-
-            const exists = messages.some(
-                (m) => m.message === message.message && m.timestamp === message.timestamp
-            );
-
-            if (!exists) {
-                messages.push(message);
-            }
-        });
-
-        messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    if (data.messages) {
+        const fresh = data.messages.map((m) => ({
+            id: m.id || Date.now() + Math.random(),
+            sender: m.sender,
+            message: m.message,
+            timestamp: m.timestamp,
+            isRead: true,
+            receivedAt: m.timestamp,
+            isFromHistory: true
+        }));
+        fresh.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        messages = fresh;
         saveMessages();
         displayMessages();
-        showFloatingNotification(`이전 메시지 ${data.messages.length}개를 불러왔습니다`, 'info');
+        if (fresh.length > 0) {
+            showFloatingNotification(`메시지 ${fresh.length}개를 불러왔습니다`, 'info');
+        }
     }
 });
 
@@ -197,7 +169,6 @@ socket.on('disconnect', () => {
     connectionStatus.textContent = '연결 끊김';
     connectionStatus.className = 'badge bg-danger fs-6';
     studentInfo.connected = false;
-
     if (messageScreen.style.display !== 'none') {
         showFloatingNotification('서버와 연결이 끊어졌습니다', 'error');
     }
@@ -209,7 +180,9 @@ socket.on('kicked', () => {
 });
 
 socket.on('delete_result', (data) => {
-    if (data.status !== 'success') {
+    if (data.status === 'success') {
+        showFloatingNotification('메시지를 숨겼습니다', 'info');
+    } else {
         showFloatingNotification(data.message || '삭제에 실패했습니다', 'warning');
     }
 });
@@ -237,7 +210,19 @@ socket.on('receive_message', (data) => {
     }
 });
 
-// 화면 전환
+socket.on('message_deleted', (data) => {
+    const mid = data.message_id;
+    if (!mid) return;
+    const before = messages.length;
+    messages = messages.filter((m) => String(m.id) !== String(mid));
+    if (messages.length !== before) {
+        saveMessages();
+        displayMessages();
+        showFloatingNotification('메시지가 삭제되었습니다', 'warning');
+    }
+});
+
+// UI
 function showLoginScreen() {
     loginScreen.style.display = 'block';
     messageScreen.style.display = 'none';
@@ -246,12 +231,27 @@ function showLoginScreen() {
 function showMessageScreen() {
     loginScreen.style.display = 'none';
     messageScreen.style.display = 'block';
-
     displayName.textContent = `반갑습니다, ${studentInfo.name}님`;
     const teacherLabel = studentInfo.teacherName || '교사';
     displayId.textContent = `교사: ${teacherLabel} (코드: ${studentInfo.teacherCode || '-'})`;
-
     displayMessages();
+}
+
+function updateSendToTeacherUI(allow) {
+    allowStudentMessages = allow;
+    if (allow) {
+        studentSendCard.style.display = 'block';
+        sendStatus.textContent = '가능';
+        sendStatus.className = 'badge bg-success';
+        sendToTeacherBtn.disabled = false;
+        studentMessageInput.disabled = false;
+    } else {
+        studentSendCard.style.display = 'none';
+        sendStatus.textContent = '불가';
+        sendStatus.className = 'badge bg-secondary';
+        sendToTeacherBtn.disabled = true;
+        studentMessageInput.disabled = true;
+    }
 }
 
 // 메시지 렌더링
@@ -268,7 +268,6 @@ function displayMessages() {
         messageList.innerHTML = '';
         messages.forEach((message) => addMessageToList(message));
     }
-
     updateMessageCount();
 }
 
@@ -279,24 +278,6 @@ function requestMessageHistory() {
             student_name: studentInfo.name
         });
     }
-}
-
-function convertUrlsToLinks(text) {
-    const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
-
-    return text.replace(urlPattern, (url) => {
-        let href = url;
-        if (url.startsWith('www.')) {
-            href = 'http://' + url;
-        }
-        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-primary text-decoration-underline">${url}</a>`;
-    });
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 function addMessageToList(message) {
@@ -315,10 +296,10 @@ function addMessageToList(message) {
                 ${!message.isRead ? '<span class="badge bg-success ms-2">새 메시지</span>' : ''}
                 ${message.isFromHistory ? '<span class="badge bg-secondary ms-2">이전 메시지</span>' : ''}
             </div>
-            <div class="d-flex align-items-start">
-                <small class="text-muted me-2">${escapeHtml(message.timestamp)}</small>
-                <button class="btn btn-sm btn-outline-danger delete-message-btn" title="이 메시지 삭제">
-                    <i class="fas fa-trash"></i>
+            <div class="d-flex align-items-center gap-2">
+                <small class="text-muted">${escapeHtml(message.timestamp)}</small>
+                <button class="btn btn-sm btn-outline-danger delete-msg-btn" title="이 메시지 숨기기">
+                    <i class="fas fa-eye-slash"></i>
                 </button>
             </div>
         </div>
@@ -328,77 +309,46 @@ function addMessageToList(message) {
         </div>
     `;
 
-    messageElement.addEventListener('click', () => {
-        if (!message.isRead) {
-            markMessageRead(message.id);
-        }
+    messageElement.addEventListener('click', function() {
+        if (!message.isRead) markMessageRead(message.id);
     });
 
-    const deleteBtn = messageElement.querySelector('.delete-message-btn');
-    deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteMessage(message.id);
-    });
+    const delBtn = messageElement.querySelector('.delete-msg-btn');
+    if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hideMessage(message.id);
+        });
+    }
 
     messageList.appendChild(messageElement);
 }
 
-function deleteMessage(messageId) {
-    messages = messages.filter((m) => m.id !== messageId);
-    saveMessages();
-    displayMessages();
-    showFloatingNotification('메시지를 삭제했습니다', 'info');
-
-    socket.emit('delete_message', {
-        teacher_code: studentInfo.teacherCode,
-        student_name: studentInfo.name,
-        message_id: messageId
-    });
-}
-
+// 상태 업데이트
 function markMessageRead(messageId) {
-    const message = messages.find((m) => m.id === messageId);
-    if (message && !message.isRead) {
-        message.isRead = true;
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg && !msg.isRead) {
+        msg.isRead = true;
         saveMessages();
-
-        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-        if (messageElement) {
-            messageElement.className = 'message-item read';
-            const badge = messageElement.querySelector('.badge');
-            if (badge) {
-                badge.remove();
-            }
+        const el = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (el) {
+            el.className = 'message-item read';
+            const badge = el.querySelector('.badge');
+            if (badge) badge.remove();
         }
-
         updateMessageCount();
     }
 }
 
 function markVisibleMessagesRead() {
     let changed = false;
-    messages.forEach((message) => {
-        if (!message.isRead) {
-            message.isRead = true;
-            changed = true;
-        }
-    });
-
-    if (changed) {
-        saveMessages();
-        displayMessages();
-    }
+    messages.forEach((m) => { if (!m.isRead) { m.isRead = true; changed = true; } });
+    if (changed) { saveMessages(); displayMessages(); }
 }
 
 function markAllMessagesRead() {
     let changed = false;
-    messages.forEach((message) => {
-        if (!message.isRead) {
-            message.isRead = true;
-            changed = true;
-        }
-    });
-
+    messages.forEach((m) => { if (!m.isRead) { m.isRead = true; changed = true; } });
     if (changed) {
         saveMessages();
         displayMessages();
@@ -411,7 +361,6 @@ function clearAllMessages() {
         showFloatingNotification('지울 메시지가 없습니다', 'info');
         return;
     }
-
     if (confirm('모든 메시지를 지우시겠습니까?')) {
         messages = [];
         saveMessages();
@@ -423,33 +372,61 @@ function clearAllMessages() {
 function updateMessageCount() {
     const total = messages.length;
     const unread = messages.filter((m) => !m.isRead).length;
-
     messageCount.textContent = total;
+    document.title = unread > 0 ? `(${unread}) 학생용 메시지` : '학생용 메시지';
+}
 
-    if (unread > 0) {
-        document.title = `(${unread}) 학생용 메시지`;
-    } else {
-        document.title = '학생용 메시지';
+function saveMessages() { localStorage.setItem('studentMessages', JSON.stringify(messages)); }
+
+// 학생 측 메시지 숨김 처리: 로컬에서 제거 후 서버에 hidden 기록 요청
+function hideMessage(messageId) {
+    if (!messageId) return;
+    const before = messages.length;
+    messages = messages.filter((m) => String(m.id) !== String(messageId));
+    if (messages.length !== before) {
+        saveMessages();
+        displayMessages();
     }
+    socket.emit('delete_message', {
+        teacher_code: studentInfo.teacherCode,
+        student_name: studentInfo.name,
+        message_id: messageId
+    });
 }
 
-function saveMessages() {
-    localStorage.setItem('studentMessages', JSON.stringify(messages));
+// 교사에게 메시지 보내기
+function sendMessageToTeacher() {
+    if (!allowStudentMessages) {
+        showFloatingNotification('교사가 수신을 허용하지 않았습니다', 'warning');
+        return;
+    }
+    const msg = studentMessageInput.value.trim();
+    if (!msg) { showFloatingNotification('메시지를 입력하세요', 'warning'); return; }
+
+    socket.emit('send_message', {
+        sender_type: 'student',
+        teacher_code: studentInfo.teacherCode,
+        student_name: studentInfo.name,
+        message: msg,
+        recipients: []
+    });
 }
 
+// 알림/유틸
 function showFloatingNotification(message, type = 'info') {
-    const colors = {
-        success: 'rgba(40, 167, 69, 0.95)',
-        info: 'rgba(23, 162, 184, 0.95)',
-        warning: 'rgba(255, 193, 7, 0.95)',
-        error: 'rgba(220, 53, 69, 0.95)'
-    };
-
+    const colors = { success: 'rgba(40, 167, 69, 0.95)', info: 'rgba(23, 162, 184, 0.95)', warning: 'rgba(255, 193, 7, 0.95)', error: 'rgba(220, 53, 69, 0.95)' };
     const notification = document.createElement('div');
     notification.className = 'floating-notification';
+    notification.style.position = 'fixed';
+    notification.style.top = '50%';
+    notification.style.left = '50%';
+    notification.style.transform = 'translate(-50%, -50%)';
     notification.style.background = colors[type] || colors.info;
+    notification.style.color = '#fff';
+    notification.style.padding = '16px 24px';
+    notification.style.borderRadius = '10px';
+    notification.style.zIndex = 9999;
     notification.innerHTML = `<i class="fas fa-info-circle me-2"></i>${message}`;
-
     document.body.appendChild(notification);
     setTimeout(() => notification.remove(), 3000);
 }
@@ -470,14 +447,22 @@ function showBrowserNotification(message) {
             tag: 'student-message',
             requireInteraction: false
         });
-
-        notification.onclick = function () {
-            window.focus();
-            notification.close();
-        };
-
-        setTimeout(() => {
-            notification.close();
-        }, 5000);
+        notification.onclick = function() { window.focus(); notification.close(); };
+        setTimeout(() => notification.close(), 5000);
     }
+}
+
+// 공통 유틸 (교사쪽과 동일 로직 유지)
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text ?? '';
+    return div.innerHTML;
+}
+
+function convertUrlsToLinks(text) {
+    const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+    return (text || '').replace(urlPattern, (url) => {
+        const href = url.startsWith('www.') ? 'http://' + url : url;
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-primary text-decoration-underline">${url}</a>`;
+    });
 }
