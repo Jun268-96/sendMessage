@@ -219,6 +219,10 @@ function updateStudentList(students) {
 }
 
 function addStudentToList(student) {
+    const placeholder = studentList.querySelector('.text-center');
+    if (placeholder) {
+        placeholder.remove();
+    }
     const isOnline = student.is_online !== false;
     const card = document.createElement('div');
     card.className = 'card student-card mb-2';

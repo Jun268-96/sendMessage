@@ -380,7 +380,11 @@ function saveMessages() { localStorage.setItem('studentMessages', JSON.stringify
 
 // 학생 측 메시지 숨김 처리: 로컬에서 제거 후 서버에 hidden 기록 요청
 function hideMessage(messageId) {
-    if (!messageId) return;
+    const numericId = Number(messageId);
+    if (!messageId || Number.isNaN(numericId)) {
+        showFloatingNotification('메시지 ID가 없어 숨김만 처리했습니다', 'warning');
+        return;
+    }
     const before = messages.length;
     messages = messages.filter((m) => String(m.id) !== String(messageId));
     if (messages.length !== before) {
@@ -390,7 +394,7 @@ function hideMessage(messageId) {
     socket.emit('delete_message', {
         teacher_code: studentInfo.teacherCode,
         student_name: studentInfo.name,
-        message_id: messageId
+        message_id: numericId
     });
 }
 

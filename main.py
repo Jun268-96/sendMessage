@@ -5,7 +5,8 @@ from flask import Flask, render_template, request, session
 from flask_socketio import SocketIO, emit, join_room, disconnect
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import psycopg
 
 app = Flask(__name__)
@@ -27,6 +28,11 @@ def get_db():
     # sslmode can be configured via DB_SSLMODE if needed (e.g., require on Render)
     sslmode = os.environ.get('DB_SSLMODE', 'prefer')
     return psycopg.connect(db_url, sslmode=sslmode)
+
+
+def now_kst_str():
+    """Return current time string in Asia/Seoul."""
+    return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul")).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def student_key(teacher_code, student_name):
@@ -475,15 +481,15 @@ def on_send_message(data):
             recipient_names = [info.get('student_name', '') for info in students.values() if info.get('teacher_code') == teacher_code]
             msg_id = save_message_multi_teacher(teacher_code, 'teacher', 'student', recipient_names or ['all'], message)
             socketio.emit(
-                'receive_message',
-                {
-                    'message_id': msg_id,
-                    'message': message,
-                    'sender': '교사',
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                },
-                room=student_room
-            )
+                    'receive_message',
+                    {
+                        'message_id': msg_id,
+                        'message': message,
+                        'sender': '교사',
+                        'timestamp': now_kst_str()
+                    },
+                    room=student_room
+                )
         else:
             for student_socket_id in recipients:
                 info = students.get(student_socket_id)
@@ -492,15 +498,15 @@ def on_send_message(data):
             msg_id = save_message_multi_teacher(teacher_code, 'teacher', 'student', recipient_names, message)
             for student_socket_id in recipients:
                 socketio.emit(
-                    'receive_message',
-                    {
-                        'message_id': msg_id,
-                        'message': message,
-                        'sender': '교사',
-                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    },
-                    room=student_socket_id
-                )
+                        'receive_message',
+                        {
+                            'message_id': msg_id,
+                            'message': message,
+                            'sender': '교사',
+                            'timestamp': now_kst_str()
+                        },
+                        room=student_socket_id
+                    )
 
         emit('message_sent', {'status': 'success', 'message_id': msg_id})
     elif sender_type == 'student' and teacher_code:
@@ -537,7 +543,7 @@ def on_send_message(data):
                 'id': msg_id,
                 'student_name': student_name,
                 'message': message,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'timestamp': now_kst_str()
             }, room=teacher_room)
 
             emit('student_message_sent', {'status': 'success', 'message_id': msg_id})
