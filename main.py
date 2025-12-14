@@ -780,8 +780,10 @@ def get_sent_messages(data):
             conn.close()
 
 
+# 앱 시작 시 DB 초기화 (프로덕션/로컬 모두 실행)
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     print("서버 시작...")
     print("교사용 페이지: http://localhost:5000/teacher")
     print("학생용 페이지: http://localhost:5000/student")
