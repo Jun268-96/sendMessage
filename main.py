@@ -462,6 +462,7 @@ def on_get_message_history(data):
     student_name = data.get('student_name')
     teacher_code = data.get('teacher_code')
     skey = student_key(teacher_code, student_name)
+    print(f'[DEBUG] get_message_history 호출: teacher_code={teacher_code}, student_name={student_name}')
 
     conn = None
     try:
@@ -489,10 +490,14 @@ def on_get_message_history(data):
                 'message': row[3],
                 'timestamp': row[4]
             })
+        
+        print(f'[DEBUG] get_message_history 결과: {len(messages)}개 메시지 발견')
+        if len(messages) > 0:
+            print(f'[DEBUG] 첫 메시지: {messages[0]}')
 
         emit('message_history', {'messages': messages})
     except Exception as e:
-        print(f'메시지 조회 오류: {e}')
+        print(f'[오류] 메시지 조회 오류: {e}')
         emit('message_history', {'messages': []})
     finally:
         if conn:
@@ -708,9 +713,11 @@ def teacher_toggle_receive(data):
 def get_teacher_messages(data):
     teacher_info = teachers.get(request.sid)
     if not teacher_info:
+        print('[DEBUG] get_teacher_messages: teacher_info 없음')
         emit('teacher_messages', {'messages': []})
         return
     teacher_code = teacher_info.get('teacher_code')
+    print(f'[DEBUG] get_teacher_messages 호출: teacher_code={teacher_code}')
     conn = None
     try:
         conn = get_db()
@@ -724,6 +731,7 @@ def get_teacher_messages(data):
             (teacher_code,)
         )
         rows = c.fetchall()
+        print(f'[DEBUG] get_teacher_messages 결과: {len(rows)}개 메시지 발견')
         msgs = []
         for row in rows:
             msgs.append({
@@ -734,7 +742,7 @@ def get_teacher_messages(data):
             })
         emit('teacher_messages', {'messages': msgs})
     except Exception as e:
-        print(f'교사 메시지 조회 오류: {e}')
+        print(f'[오류] 교사 메시지 조회 오류: {e}')
         emit('teacher_messages', {'messages': []})
     finally:
         if conn:
@@ -746,9 +754,11 @@ def get_sent_messages(data):
     """교사가 보낸 메시지 히스토리 조회"""
     teacher_info = teachers.get(request.sid)
     if not teacher_info:
+        print('[DEBUG] get_sent_messages: teacher_info 없음')
         emit('sent_messages', {'messages': []})
         return
     teacher_code = teacher_info.get('teacher_code')
+    print(f'[DEBUG] get_sent_messages 호출: teacher_code={teacher_code}')
     conn = None
     try:
         conn = get_db()
@@ -762,6 +772,7 @@ def get_sent_messages(data):
             (teacher_code,)
         )
         rows = c.fetchall()
+        print(f'[DEBUG] get_sent_messages 결과: {len(rows)}개 메시지 발견')
         msgs = []
         for row in rows:
             msgs.append({
@@ -772,7 +783,7 @@ def get_sent_messages(data):
             })
         emit('sent_messages', {'messages': msgs})
     except Exception as e:
-        print(f'전송 메시지 조회 오류: {e}')
+        print(f'[오류] 전송 메시지 조회 오류: {e}')
         emit('sent_messages', {'messages': []})
     finally:
         if conn:
