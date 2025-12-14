@@ -188,12 +188,7 @@ def init_db():
 
 @app.route('/')
 def index():
-    return '''
-    <h1>교사-학생 메시지 알림 시스템</h1>
-    <p><a href="/teacher/register">교사 등록</a></p>
-    <p><a href="/teacher/login">교사 로그인</a></p>
-    <p><a href="/student">학생 페이지</a></p>
-    '''
+    return render_template('index.html')
 
 
 @app.route('/teacher/register')

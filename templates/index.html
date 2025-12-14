@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>메시지 전송 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .main-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            max-width: 800px;
+            width: 100%;
+            overflow: hidden;
+            transition: transform 0.3s ease;
+        }
+
+        .main-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .hero-section {
+            background: linear-gradient(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.05)), url('https://source.unsplash.com/random/800x400/?school,education') center/cover;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+            text-align: center;
+        }
+
+        .action-btn {
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            transition: all 0.3s ease;
+            height: 100%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            background: #fff;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .action-btn:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            color: inherit;
+        }
+
+        .btn-teacher-register {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .btn-teacher-register:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-teacher-login {
+            border-color: #764ba2;
+            color: #764ba2;
+        }
+
+        .btn-teacher-login:hover {
+            background: #764ba2;
+            color: white;
+        }
+
+        .btn-student {
+            border-color: #20c997;
+            color: #20c997;
+        }
+
+        .btn-student:hover {
+            background: #20c997;
+            color: white;
+        }
+
+        .icon-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px;
+            font-size: 2rem;
+            background: rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .action-btn:hover .icon-circle {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="main-card">
+        <div class="p-5 text-center">
+            <h1 class="fw-bold mb-2 display-6" style="color: #4a5568;">
+                <i class="fas fa-paper-plane text-primary me-2"></i>학교 메시지 알림
+            </h1>
+            <p class="text-muted mb-5">선생님과 학생을 실시간으로 연결하는 스마트 알림장</p>
+
+            <div class="row g-4">
+                <!-- 교사 등록 -->
+                <div class="col-md-4">
+                    <a href="/teacher/register" class="action-btn btn-teacher-register h-100">
+                        <div class="icon-circle">
+                            <i class="fas fa-user-plus"></i>
+                        </div>
+                        <h4 class="fw-bold mb-3">교사 등록</h4>
+                        <p class="small opacity-75 mb-0">새로운 학급을 개설하고<br>초대 코드를 발급받으세요</p>
+                    </a>
+                </div>
+
+                <!-- 교사 로그인 -->
+                <div class="col-md-4">
+                    <a href="/teacher/login" class="action-btn btn-teacher-login h-100">
+                        <div class="icon-circle">
+                            <i class="fas fa-chalkboard-teacher"></i>
+                        </div>
+                        <h4 class="fw-bold mb-3">교사 로그인</h4>
+                        <p class="small opacity-75 mb-0">메시지를 전송하고<br>학생들과 소통하세요</p>
+                    </a>
+                </div>
+
+                <!-- 학생 페이지 -->
+                <div class="col-md-4">
+                    <a href="/student" class="action-btn btn-student h-100">
+                        <div class="icon-circle">
+                            <i class="fas fa-user-graduate"></i>
+                        </div>
+                        <h4 class="fw-bold mb-3">학생 페이지</h4>
+                        <p class="small opacity-75 mb-0">선생님의 메시지를<br>확인하고 답장하세요</p>
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="bg-light p-3 text-center text-muted small border-top">
+            <i class="fas fa-shield-alt me-1"></i> 안전한 실시간 소통 플랫폼
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>
