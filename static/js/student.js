@@ -17,7 +17,6 @@ const displayName = document.getElementById('displayName');
 const displayId = document.getElementById('displayId');
 const messageList = document.getElementById('messageList');
 const messageCount = document.getElementById('messageCount');
-const markAllReadBtn = document.getElementById('markAllReadBtn');
 const clearMessagesBtn = document.getElementById('clearMessagesBtn');
 const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
 const notificationSound = document.getElementById('notificationSound');
@@ -38,9 +37,8 @@ function initEvents() {
 
     teacherCodeInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') studentNameInput.focus(); });
     studentNameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') connectToServer(); });
-    teacherCodeInput.addEventListener('input', function() { this.value = this.value.replace(/[^0-9]/g, ''); });
+    teacherCodeInput.addEventListener('input', function () { this.value = this.value.replace(/[^0-9]/g, ''); });
 
-    markAllReadBtn.addEventListener('click', markAllMessagesRead);
     clearMessagesBtn.addEventListener('click', clearAllMessages);
     refreshHistoryBtn.addEventListener('click', requestMessageHistory);
 
@@ -49,7 +47,7 @@ function initEvents() {
         if (e.key === 'Enter' && e.ctrlKey) sendMessageToTeacher();
     });
 
-    document.addEventListener('visibilitychange', function() {
+    document.addEventListener('visibilitychange', function () {
         if (!document.hidden && studentInfo.connected) {
             setTimeout(markVisibleMessagesRead, 500);
         }
@@ -75,7 +73,7 @@ function loadStoredData() {
 
 function setupPWA() {
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/static/sw.js').catch(() => { });
     }
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
@@ -92,6 +90,11 @@ function connectToServer() {
 
     studentInfo = { teacherCode, name, teacherName: '', connected: false };
     localStorage.setItem('studentInfo', JSON.stringify(studentInfo));
+
+    // 소켓이 끊겨있으면 다시 연결
+    if (!socket.connected) {
+        socket.connect();
+    }
 
     socket.emit('student_join', {
         teacher_code: teacherCode,
@@ -310,7 +313,7 @@ function addMessageToList(message) {
         </div>
     `;
 
-    messageElement.addEventListener('click', function() {
+    messageElement.addEventListener('click', function () {
         if (!message.isRead) markMessageRead(message.id);
     });
 
@@ -438,7 +441,7 @@ function showFloatingNotification(message, type = 'info') {
 
 function showMessageNotification(message) {
     if (notificationSound) {
-        notificationSound.play().catch(() => {});
+        notificationSound.play().catch(() => { });
     }
     showFloatingNotification(`${message.sender}: ${message.message.substring(0, 50)}...`, 'success');
 }
@@ -452,7 +455,7 @@ function showBrowserNotification(message) {
             tag: 'student-message',
             requireInteraction: false
         });
-        notification.onclick = function() { window.focus(); notification.close(); };
+        notification.onclick = function () { window.focus(); notification.close(); };
         setTimeout(() => notification.close(), 5000);
     }
 }

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,16 +8,64 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; font-size: 18px; }
-        .main-container { padding: 20px; max-width: 800px; margin: 0 auto; }
-        .login-card, .message-container { background: rgba(255, 255, 255, 0.95); border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); backdrop-filter: blur(10px); }
-        .message-item { background: white; border-radius: 10px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .connection-status { position: fixed; top: 20px; right: 20px; z-index: 1000; font-size: 16px; }
-        .message-list { max-height: 60vh; overflow-y: auto; padding-right: 10px; }
-        .student-info { background: rgba(33, 150, 243, 0.1); border-radius: 10px; padding: 15px; margin-bottom: 20px; }
-        .send-card { background: rgba(33,150,243,0.08); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-size: 18px;
+        }
+
+        .main-container {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .login-card,
+        .message-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .message-item {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            font-size: 16px;
+        }
+
+        .message-list {
+            max-height: 60vh;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .student-info {
+            background: rgba(33, 150, 243, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .send-card {
+            background: rgba(33, 150, 243, 0.08);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
     </style>
 </head>
+
 <body>
     <div class="connection-status">
         <span class="badge bg-secondary fs-6" id="connectionStatus">연결 대기</span>
@@ -30,23 +79,27 @@
                 <h2 class="text-primary">학생 메시지 수신</h2>
                 <p class="text-muted">교사에게서 오는 메시지를 실시간으로 받아보세요.</p>
             </div>
-            
+
             <div class="row">
                 <div class="col-md-8 mx-auto">
                     <div class="mb-3">
                         <label for="teacherCode" class="form-label"><i class="fas fa-key me-2"></i>교사 코드 (6자리)</label>
-                        <input type="text" class="form-control form-control-lg text-center" id="teacherCode" placeholder="예) 865947" maxlength="6" required style="font-size: 1.3rem; letter-spacing: 0.2em; font-weight: bold;">
+                        <input type="text" class="form-control form-control-lg text-center" id="teacherCode"
+                            placeholder="예) 865947" maxlength="6" required
+                            style="font-size: 1.3rem; letter-spacing: 0.2em; font-weight: bold;">
                         <div class="form-text text-center">교사가 알려준 6자리 숫자 코드를 입력하세요.</div>
                     </div>
 
                     <div class="mb-3">
                         <label for="studentName" class="form-label"><i class="fas fa-user me-2"></i>이름</label>
-                        <input type="text" class="form-control form-control-lg" id="studentName" placeholder="예) 김학생" required>
+                        <input type="text" class="form-control form-control-lg" id="studentName" placeholder="예) 김학생"
+                            required>
                         <div class="form-text">이름만으로 연결합니다.</div>
                     </div>
 
                     <div class="d-grid">
-                        <button class="btn btn-primary btn-lg" id="connectBtn"><i class="fas fa-sign-in-alt me-2"></i>연결하기</button>
+                        <button class="btn btn-primary btn-lg" id="connectBtn"><i
+                                class="fas fa-sign-in-alt me-2"></i>연결하기</button>
                     </div>
                 </div>
             </div>
@@ -59,7 +112,8 @@
                     <h4 class="mb-1" id="displayName">반갑습니다!</h4>
                     <small class="text-muted" id="displayId">교사 코드로 연결됨</small>
                 </div>
-                <button class="btn btn-outline-secondary" id="disconnectBtn"><i class="fas fa-sign-out-alt"></i> 연결 종료</button>
+                <button class="btn btn-outline-secondary" id="disconnectBtn"><i class="fas fa-sign-out-alt"></i> 연결
+                    종료</button>
             </div>
 
             <!-- 교사에게 보내기 -->
@@ -69,16 +123,19 @@
                     <span class="badge bg-success" id="sendStatus">가능</span>
                 </div>
                 <div class="mb-2">
-                    <textarea class="form-control" id="studentMessageInput" rows="3" placeholder="교사에게 보낼 메시지를 입력하세요"></textarea>
+                    <textarea class="form-control" id="studentMessageInput" rows="3"
+                        placeholder="교사에게 보낼 메시지를 입력하세요"></textarea>
                 </div>
                 <div class="text-end">
-                    <button class="btn btn-primary btn-sm" id="sendToTeacherBtn"><i class="fas fa-paper-plane"></i> 전송</button>
+                    <button class="btn btn-primary btn-sm" id="sendToTeacherBtn"><i class="fas fa-paper-plane"></i>
+                        전송</button>
                 </div>
             </div>
 
             <div class="card mb-3">
                 <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="fas fa-envelope"></i> 받은 메시지 <span class="badge bg-light text-primary ms-2" id="messageCount">0</span></h5>
+                    <h5 class="mb-0"><i class="fas fa-envelope"></i> 받은 메시지 <span
+                            class="badge bg-light text-primary ms-2" id="messageCount">0</span></h5>
                 </div>
                 <div class="card-body p-3">
                     <div class="message-list" id="messageList">
@@ -93,22 +150,26 @@
 
             <div class="mt-3 d-flex justify-content-between">
                 <div>
-                    <button class="btn btn-outline-primary me-2" id="refreshHistoryBtn"><i class="fas fa-sync-alt"></i> 히스토리 새로고침</button>
-                    <button class="btn btn-outline-info" id="markAllReadBtn"><i class="fas fa-check-double"></i> 모두 읽음</button>
+                    <button class="btn btn-outline-primary" id="refreshHistoryBtn"><i class="fas fa-sync-alt"></i>
+                        새로고침</button>
                 </div>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-outline-secondary" id="clearMessagesBtn"><i class="fas fa-trash"></i> 메시지 지우기</button>
+                    <button class="btn btn-outline-secondary" id="clearMessagesBtn"><i class="fas fa-trash"></i> 메시지
+                        지우기</button>
                 </div>
             </div>
         </div>
     </div>
 
     <audio id="notificationSound" class="d-none" preload="auto">
-        <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmIbBSFy0u6Oayj8YmZqAABBcmlZAAAAAElFTKSuQmCC" type="audio/wav">
+        <source
+            src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmIbBSFy0u6Oayj8YmZqAABBcmlZAAAAAElFTKSuQmCC"
+            type="audio/wav">
     </audio>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="{{ url_for('static', filename='js/student.js') }}"></script>
 </body>
+
 </html>

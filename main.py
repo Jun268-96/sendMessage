@@ -96,13 +96,12 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    # ⚠️ 기존 테이블 삭제 후 재생성 (비밀번호 컬럼 추가를 위해)
-    # ⚠️ 주의: 배포 후 정상 작동 확인되면 아래 5줄을 다시 주석 처리해야 합니다!
-    c.execute('DROP TABLE IF EXISTS teachers CASCADE')
-    c.execute('DROP TABLE IF EXISTS students CASCADE')
-    c.execute('DROP TABLE IF EXISTS messages CASCADE')
-    c.execute('DROP TABLE IF EXISTS hidden_messages CASCADE')
-    c.execute('DROP TABLE IF EXISTS teacher_settings CASCADE')
+    # 기존 테이블 삭제 코드 (비밀번호 컬럼 추가 완료, 더 이상 필요 없음)
+    # c.execute('DROP TABLE IF EXISTS teachers CASCADE')
+    # c.execute('DROP TABLE IF EXISTS students CASCADE')
+    # c.execute('DROP TABLE IF EXISTS messages CASCADE')
+    # c.execute('DROP TABLE IF EXISTS hidden_messages CASCADE')
+    # c.execute('DROP TABLE IF EXISTS teacher_settings CASCADE')
 
     c.execute(
         '''CREATE TABLE IF NOT EXISTS teachers
