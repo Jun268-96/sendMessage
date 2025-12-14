@@ -92,6 +92,15 @@ def generate_teacher_code():
             return code
 
 
+def format_timestamp(ts):
+    """datetime 객체를 JSON 직렬화 가능한 문자열로 변환"""
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        return ts
+    return ts.strftime('%Y-%m-%d %H:%M:%S')
+
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -350,7 +359,7 @@ def on_teacher_join(data):
                 'student_name': student_name,
                 'student_id': student_id or '',
                 'socket_id': socket_id,
-                'last_seen': last_seen,
+                'last_seen': format_timestamp(last_seen),
                 'is_online': is_online,
                 'display_name': student_name
             })
@@ -488,7 +497,7 @@ def on_get_message_history(data):
                 'id': row[0],
                 'sender': '교사' if row[1] == 'teacher' else row[2],
                 'message': row[3],
-                'timestamp': row[4]
+                'timestamp': format_timestamp(row[4])
             })
         
         print(f'[DEBUG] get_message_history 결과: {len(messages)}개 메시지 발견')
@@ -738,7 +747,7 @@ def get_teacher_messages(data):
                 'id': row[0],
                 'student_name': row[1],
                 'message': row[2],
-                'timestamp': row[3]
+                'timestamp': format_timestamp(row[3])
             })
         emit('teacher_messages', {'messages': msgs})
     except Exception as e:
@@ -779,7 +788,7 @@ def get_sent_messages(data):
                 'id': row[0],
                 'recipient': row[1],
                 'message': row[2],
-                'timestamp': row[3]
+                'timestamp': format_timestamp(row[3])
             })
         emit('sent_messages', {'messages': msgs})
     except Exception as e:
