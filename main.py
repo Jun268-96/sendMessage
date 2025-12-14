@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'teacher_student_message_system'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-fallback-key-change-in-production')
 
-# eventlet 대신 threading 모드로 강제해 Python 3.13 ssl 호환성 문제 회피
+# gevent 모드 사용 (Render 배포용)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 # In-memory connection tracking
@@ -302,6 +302,7 @@ def on_teacher_join(data):
     teacher_room = f'teacher_{teacher_code}'
     join_room(teacher_room)
 
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
@@ -314,7 +315,6 @@ def on_teacher_join(data):
         )
 
         db_students = c.fetchall()
-        conn.close()
 
         student_list = []
         for db_student in db_students:
@@ -335,6 +335,9 @@ def on_teacher_join(data):
     except Exception as e:
         print(f'교사 연결 오류: {e}')
         emit('student_list_update', [])
+    finally:
+        if conn:
+            conn.close()
 
     emit('receive_status', {'allow': allow_messages})
 
@@ -344,6 +347,7 @@ def on_student_join(data):
     teacher_code = data.get('teacher_code')
     student_name = data.get('student_name')
 
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
@@ -351,11 +355,10 @@ def on_student_join(data):
         teacher = c.fetchone()
 
         if not teacher:
-            conn.close()
             emit('student_join_error', {'error': '유효하지 않은 교사 코드입니다.'})
             return
 
-        teacher_name = teacher[0]
+        teacher_name_db = teacher[0]
         class_number = ''
         student_id = ''
 
@@ -372,7 +375,6 @@ def on_student_join(data):
             (teacher_code, class_number, student_name, student_id, request.sid)
         )
         conn.commit()
-        conn.close()
 
         student_info = {
             'teacher_code': teacher_code,
@@ -380,7 +382,7 @@ def on_student_join(data):
             'student_name': student_name,
             'student_id': student_id,
             'socket_id': request.sid,
-            'teacher_name': teacher_name
+            'teacher_name': teacher_name_db
         }
 
         students[request.sid] = student_info
@@ -394,15 +396,18 @@ def on_student_join(data):
         emit('student_join_success', {
             'status': 'success',
             'student_info': student_info,
-            'teacher_name': teacher_name,
+            'teacher_name': teacher_name_db,
             'allow_messages': allow_messages
         })
 
         socketio.emit('student_connected', student_info, room=teacher_room)
-        print(f"학생 연결: {student_name} -> 교사 {teacher_name} ({teacher_code})")
+        print(f"학생 연결: {student_name} -> 교사 {teacher_name_db} ({teacher_code})")
     except Exception as e:
         print(f'학생 연결 오류: {e}')
         emit('student_join_error', {'error': '연결 중 오류가 발생했습니다.'})
+    finally:
+        if conn:
+            conn.close()
 
 
 @socketio.on('kick_student')
@@ -433,6 +438,7 @@ def on_get_message_history(data):
     teacher_code = data.get('teacher_code')
     skey = student_key(teacher_code, student_name)
 
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
@@ -459,11 +465,13 @@ def on_get_message_history(data):
                 'timestamp': row[4]
             })
 
-        conn.close()
         emit('message_history', {'messages': messages})
     except Exception as e:
         print(f'메시지 조회 오류: {e}')
         emit('message_history', {'messages': []})
+    finally:
+        if conn:
+            conn.close()
 
 
 @socketio.on('send_message')
@@ -591,21 +599,24 @@ def delete_message(data):
         emit('delete_result', {'status': 'error', 'message': '필수 값이 누락되었습니다.'})
         return
 
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
         c.execute(
-            '''INSERT OR IGNORE INTO hidden_messages (message_id, teacher_code, student_key)
+            '''INSERT INTO hidden_messages (message_id, teacher_code, student_key)
                VALUES (%s, %s, %s)
                ON CONFLICT (message_id, student_key) DO NOTHING''',
             (message_id, teacher_code, student_key(teacher_code, student_name))
         )
         conn.commit()
-        conn.close()
         emit('delete_result', {'status': 'success', 'message_id': message_id})
     except Exception as e:
         print(f'메시지 삭제 오류: {e}')
         emit('delete_result', {'status': 'error', 'message': '삭제 중 오류가 발생했습니다.'})
+    finally:
+        if conn:
+            conn.close()
 
 
 @socketio.on('delete_message_teacher')
@@ -622,20 +633,19 @@ def delete_message_teacher(data):
         emit('delete_result_teacher', {'status': 'error', 'message': '메시지 ID가 없습니다.'})
         return
 
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
         c.execute('SELECT teacher_code FROM messages WHERE id = %s', (message_id,))
         row = c.fetchone()
         if not row or row[0] != teacher_code:
-            conn.close()
             emit('delete_result_teacher', {'status': 'error', 'message': '삭제 권한이 없거나 메시지가 없습니다.'})
             return
 
         c.execute('DELETE FROM messages WHERE id = %s', (message_id,))
         c.execute('DELETE FROM hidden_messages WHERE message_id = %s', (message_id,))
         conn.commit()
-        conn.close()
 
         student_room = f'students_{teacher_code}'
         socketio.emit('message_deleted', {'message_id': message_id}, room=student_room)
@@ -644,6 +654,9 @@ def delete_message_teacher(data):
     except Exception as e:
         print(f'교사용 메시지 삭제 오류: {e}')
         emit('delete_result_teacher', {'status': 'error', 'message': '삭제 중 오류가 발생했습니다.'})
+    finally:
+        if conn:
+            conn.close()
 
 
 @socketio.on('teacher_toggle_receive')
@@ -673,6 +686,7 @@ def get_teacher_messages(data):
         emit('teacher_messages', {'messages': []})
         return
     teacher_code = teacher_info.get('teacher_code')
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
@@ -685,7 +699,6 @@ def get_teacher_messages(data):
             (teacher_code,)
         )
         rows = c.fetchall()
-        conn.close()
         msgs = []
         for row in rows:
             msgs.append({
@@ -698,6 +711,9 @@ def get_teacher_messages(data):
     except Exception as e:
         print(f'교사 메시지 조회 오류: {e}')
         emit('teacher_messages', {'messages': []})
+    finally:
+        if conn:
+            conn.close()
 
 
 if __name__ == '__main__':

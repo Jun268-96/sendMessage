@@ -3,6 +3,7 @@ const socket = io();
 
 let studentInfo = { teacherCode: '', name: '', teacherName: '', connected: false };
 let messages = [];
+let allowStudentMessages = false;
 
 // DOM
 const connectionStatus = document.getElementById('connectionStatus');

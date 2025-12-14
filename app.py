@@ -2,10 +2,11 @@ from flask import Flask, render_template, request, session
 from flask_socketio import SocketIO, emit, join_room, disconnect
 import sqlite3
 import random
+import os
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'teacher_student_message_system'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-fallback-key-change-in-production')
 
 # eventlet 대신 threading 모드로 강제해 Python 3.13 ssl 호환성 문제 회피
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -13,7 +14,6 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # In-memory connection tracking
 teachers = {}
 students = {}
-teacher_settings = {}  # teacher_code -> allow_student_messages
 teacher_settings = {}  # teacher_code -> allow_student_messages
 
 
@@ -281,8 +281,6 @@ def on_teacher_join(data):
     teacher_room = f'teacher_{teacher_code}'
     join_room(teacher_room)
 
-    allow_messages = get_teacher_allow_status(teacher_code)
-
     try:
         conn = get_db()
         c = conn.cursor()
@@ -317,9 +315,6 @@ def on_teacher_join(data):
         print(f'교사 연결 오류: {e}')
         emit('student_list_update', [])
 
-    emit('receive_status', {'allow': allow_messages})
-
-    # 현재 수신 허용 상태 전달
     emit('receive_status', {'allow': allow_messages})
 
 
