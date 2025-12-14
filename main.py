@@ -716,6 +716,44 @@ def get_teacher_messages(data):
             conn.close()
 
 
+@socketio.on('get_sent_messages')
+def get_sent_messages(data):
+    """교사가 보낸 메시지 히스토리 조회"""
+    teacher_info = teachers.get(request.sid)
+    if not teacher_info:
+        emit('sent_messages', {'messages': []})
+        return
+    teacher_code = teacher_info.get('teacher_code')
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute(
+            '''SELECT id, recipient_id, message, timestamp
+               FROM messages
+               WHERE teacher_code = %s AND sender_type = 'teacher'
+               ORDER BY id DESC
+               LIMIT 100''',
+            (teacher_code,)
+        )
+        rows = c.fetchall()
+        msgs = []
+        for row in rows:
+            msgs.append({
+                'id': row[0],
+                'recipient': row[1],
+                'message': row[2],
+                'timestamp': row[3]
+            })
+        emit('sent_messages', {'messages': msgs})
+    except Exception as e:
+        print(f'전송 메시지 조회 오류: {e}')
+        emit('sent_messages', {'messages': []})
+    finally:
+        if conn:
+            conn.close()
+
+
 if __name__ == '__main__':
     init_db()
     print("서버 시작...")

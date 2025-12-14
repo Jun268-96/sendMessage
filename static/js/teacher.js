@@ -37,7 +37,7 @@ let modalTitle = null;
 
 const toast = new bootstrap.Toast(notificationToast);
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     initModal();
     initializeEventListeners();
     connectToServer();
@@ -67,11 +67,11 @@ function initModal() {
 
 function initializeEventListeners() {
     sendMessageBtn.addEventListener('click', sendMessage);
-    messageText.addEventListener('keypress', function(e) {
+    messageText.addEventListener('keypress', function (e) {
         if (e.key === 'Enter' && e.ctrlKey) sendMessage();
     });
 
-    sendToAllCheckbox.addEventListener('change', function() {
+    sendToAllCheckbox.addEventListener('change', function () {
         updateRecipientInfo();
         if (this.checked) {
             selectedStudents.clear();
@@ -86,7 +86,7 @@ function initializeEventListeners() {
     recipientTooltipBtn.addEventListener('mouseleave', hideRecipientTooltip);
     recipientTooltipBtn.addEventListener('blur', hideRecipientTooltip);
 
-    allowStudentMessagesToggle.addEventListener('change', function() {
+    allowStudentMessagesToggle.addEventListener('change', function () {
         socket.emit('teacher_toggle_receive', { allow: this.checked });
     });
 
@@ -108,23 +108,23 @@ function connectToServer() {
 }
 
 // 소켓 이벤트
-socket.on('connect', function() {
+socket.on('connect', function () {
     connectionStatus.textContent = '연결됨';
     connectionStatus.className = 'badge bg-success';
     showNotification('서버와 연결되었습니다', 'success');
 });
 
-socket.on('disconnect', function() {
+socket.on('disconnect', function () {
     connectionStatus.textContent = '연결 끊김';
     connectionStatus.className = 'badge bg-danger';
     showNotification('서버 연결이 끊어졌습니다', 'danger');
 });
 
-socket.on('student_list_update', function(students) {
+socket.on('student_list_update', function (students) {
     updateStudentList(students);
 });
 
-socket.on('student_connected', function(student) {
+socket.on('student_connected', function (student) {
     // 동일 이름으로 이전에 남아있던 카드/소켓 정보를 제거해 중복 표시를 막음
     removeStudentByName(student.student_name);
     connectedStudents.set(student.socket_id, student);
@@ -133,7 +133,7 @@ socket.on('student_connected', function(student) {
     showNotification(`${student.student_name} 학생이 연결되었습니다`, 'info');
 });
 
-socket.on('student_disconnected', function(student) {
+socket.on('student_disconnected', function (student) {
     connectedStudents.delete(student.socket_id);
     removeStudentFromList(student.socket_id);
     selectedStudents.delete(student.socket_id);
@@ -142,7 +142,7 @@ socket.on('student_disconnected', function(student) {
     showNotification(`${student.student_name} 학생의 연결이 해제되었습니다`, 'warning');
 });
 
-socket.on('kick_result', function(data) {
+socket.on('kick_result', function (data) {
     if (data.status === 'success') {
         showNotification(`${data.student_name || '학생'}을 내보냈습니다`, 'success');
     } else {
@@ -150,25 +150,43 @@ socket.on('kick_result', function(data) {
     }
 });
 
-socket.on('receive_status', function(data) {
+socket.on('receive_status', function (data) {
     allowStudentMessages = !!data.allow;
     allowStudentMessagesToggle.checked = allowStudentMessages;
     studentMessageStatus.textContent = allowStudentMessages ? '수신 중' : '수신 불가';
     studentMessageStatus.className = allowStudentMessages ? 'badge bg-success text-white' : 'badge bg-dark text-white';
+
+    // 페이지 로드 시 메시지 히스토리 자동 조회
+    requestTeacherMessages();
+    requestSentMessages();
 });
 
-socket.on('new_message_from_student', function(data) {
+socket.on('new_message_from_student', function (data) {
     studentMessages.unshift(data);
     renderStudentPreview();
     showNotification(`학생 메시지 도착: ${data.student_name}`, 'info');
 });
 
-socket.on('teacher_messages', function(payload) {
+socket.on('teacher_messages', function (payload) {
     studentMessages = payload.messages || [];
     renderStudentPreview();
 });
 
-socket.on('delete_result_teacher', function(data) {
+socket.on('sent_messages', function (payload) {
+    // 서버에서 받아온 데이터를 sentMessages 형식으로 변환
+    const msgs = payload.messages || [];
+    sentMessages = msgs.map(msg => ({
+        id: msg.id,
+        label: msg.recipient || '전체 학생',
+        recipients: msg.recipient ? msg.recipient.split(',') : [],
+        isAll: msg.recipient === 'all',
+        message: msg.message,
+        timestamp: msg.timestamp
+    }));
+    renderSentPreview();
+});
+
+socket.on('delete_result_teacher', function (data) {
     if (data.status === 'success') {
         showNotification('메시지가 삭제되었습니다', 'success');
         sentMessages = sentMessages.filter(m => String(m.id) !== String(data.message_id));
@@ -178,7 +196,7 @@ socket.on('delete_result_teacher', function(data) {
     }
 });
 
-socket.on('message_sent', function(data) {
+socket.on('message_sent', function (data) {
     if (data.status === 'success') {
         const message = messageText.value;
         const recipientNames = lastSentNames.length ? lastSentNames : buildSelectedNames();
@@ -478,6 +496,11 @@ function requestTeacherMessages() {
     socket.emit('get_teacher_messages', {});
 }
 
+// 교사가 보낸 메시지 전체 조회 요청
+function requestSentMessages() {
+    socket.emit('get_sent_messages', {});
+}
+
 // 학생 메시지 카드를 추가하는 헬퍼
 function prependStudentMessage(msg) {
     const container = studentMessageHistory;
@@ -519,7 +542,7 @@ function openModal(title, items, isSent) {
 // 메시지 저장/알림
 function convertUrlsToLinks(text) {
     const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
-    return text.replace(urlPattern, function(url) {
+    return text.replace(urlPattern, function (url) {
         let href = url;
         if (url.startsWith('www.')) href = 'http://' + url;
         return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-primary text-decoration-underline">${url}</a>`;
