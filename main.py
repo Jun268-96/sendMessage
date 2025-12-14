@@ -638,6 +638,9 @@ def delete_message(data):
         emit('delete_result', {'status': 'error', 'message': '필수 값이 누락되었습니다.'})
         return
 
+    skey = student_key(teacher_code, student_name)
+    print(f'[DEBUG] delete_message 호출: teacher_code={teacher_code}, student_name={student_name}, message_id={message_id}, key={skey}')
+
     conn = None
     try:
         conn = get_db()
@@ -646,12 +649,18 @@ def delete_message(data):
             '''INSERT INTO hidden_messages (message_id, teacher_code, student_key)
                VALUES (%s, %s, %s)
                ON CONFLICT (message_id, student_key) DO NOTHING''',
-            (message_id, teacher_code, student_key(teacher_code, student_name))
+            (message_id, teacher_code, skey)
         )
         conn.commit()
+        
+        # 저장 확인용 로그
+        c.execute('SELECT * FROM hidden_messages WHERE message_id = %s AND student_key = %s', (message_id, skey))
+        saved = c.fetchone()
+        print(f'[DEBUG] hidden_messages 저장 확인: {saved}')
+
         emit('delete_result', {'status': 'success', 'message_id': message_id})
     except Exception as e:
-        print(f'메시지 삭제 오류: {e}')
+        print(f'[오류] 메시지 삭제 오류: {e}')
         emit('delete_result', {'status': 'error', 'message': '삭제 중 오류가 발생했습니다.'})
     finally:
         if conn:
