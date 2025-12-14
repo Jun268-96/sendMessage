@@ -3,6 +3,7 @@ monkey.patch_all()
 
 from flask import Flask, render_template, request, session
 from flask_socketio import SocketIO, emit, join_room, disconnect
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import random
 from datetime import datetime, timezone
@@ -95,10 +96,19 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
 
+    # ⚠️ 기존 테이블 삭제 후 재생성 (비밀번호 컬럼 추가를 위해)
+    # ⚠️ 주의: 배포 후 정상 작동 확인되면 아래 5줄을 다시 주석 처리해야 합니다!
+    c.execute('DROP TABLE IF EXISTS teachers CASCADE')
+    c.execute('DROP TABLE IF EXISTS students CASCADE')
+    c.execute('DROP TABLE IF EXISTS messages CASCADE')
+    c.execute('DROP TABLE IF EXISTS hidden_messages CASCADE')
+    c.execute('DROP TABLE IF EXISTS teacher_settings CASCADE')
+
     c.execute(
         '''CREATE TABLE IF NOT EXISTS teachers
            (teacher_code TEXT PRIMARY KEY,
             teacher_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP)'''
     )
@@ -186,16 +196,27 @@ def teacher_register():
 @app.route('/teacher/register', methods=['POST'])
 def teacher_register_post():
     teacher_name = request.form.get('teacher_name', '').strip()
+    password = request.form.get('password', '')
+    password_confirm = request.form.get('password_confirm', '')
+
     if not teacher_name:
         return render_template('teacher_register.html', error='교사 이름을 입력해주세요.')
+    
+    if not password or len(password) < 4:
+        return render_template('teacher_register.html', error='비밀번호는 4자 이상이어야 합니다.')
+    
+    if password != password_confirm:
+        return render_template('teacher_register.html', error='비밀번호가 일치하지 않습니다.')
 
     teacher_code = generate_teacher_code()
+    password_hash = generate_password_hash(password)
+    
     try:
         conn = get_db()
         c = conn.cursor()
         c.execute(
-            'INSERT INTO teachers (teacher_code, teacher_name) VALUES (%s, %s)',
-            (teacher_code, teacher_name)
+            'INSERT INTO teachers (teacher_code, teacher_name, password_hash) VALUES (%s, %s, %s)',
+            (teacher_code, teacher_name, password_hash)
         )
         conn.commit()
         conn.close()
@@ -216,16 +237,21 @@ def teacher_login():
 @app.route('/teacher/login', methods=['POST'])
 def teacher_login_post():
     teacher_code = request.form.get('teacher_code', '').strip()
+    password = request.form.get('password', '')
+    
     if not teacher_code:
         return render_template('teacher_login.html', error='교사 코드를 입력해주세요.')
+    
+    if not password:
+        return render_template('teacher_login.html', error='비밀번호를 입력해주세요.')
 
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT teacher_name FROM teachers WHERE teacher_code = %s', (teacher_code,))
+        c.execute('SELECT teacher_name, password_hash FROM teachers WHERE teacher_code = %s', (teacher_code,))
         teacher = c.fetchone()
 
-        if teacher:
+        if teacher and check_password_hash(teacher[1], password):
             c.execute(
                 'UPDATE teachers SET last_login = CURRENT_TIMESTAMP WHERE teacher_code = %s',
                 (teacher_code,)
@@ -239,7 +265,7 @@ def teacher_login_post():
             return render_template('teacher.html', teacher_code=teacher_code, teacher_name=teacher[0])
         else:
             conn.close()
-            return render_template('teacher_login.html', error='교사 코드를 확인해주세요.')
+            return render_template('teacher_login.html', error='교사 코드 또는 비밀번호가 올바르지 않습니다.')
     except Exception as e:
         return render_template('teacher_login.html', error=f'로그인 실패: {str(e)}')
 

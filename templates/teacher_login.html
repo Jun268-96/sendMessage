@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,16 +15,18 @@
             align-items: center;
             justify-content: center;
         }
+
         .login-card {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             backdrop-filter: blur(10px);
             max-width: 500px;
             width: 100%;
         }
     </style>
 </head>
+
 <body>
     <div class="login-card p-5">
         <div class="text-center mb-4">
@@ -39,17 +42,24 @@
         {% endif %}
 
         <form method="POST">
-            <div class="mb-4">
+            <div class="mb-3">
                 <label for="teacher_code" class="form-label">
                     <i class="fas fa-key me-2"></i>교사 코드 (6자리)
                 </label>
-                <input type="text" class="form-control form-control-lg text-center" 
-                       id="teacher_code" name="teacher_code" 
-                       placeholder="예: 123456" maxlength="6" required
-                       style="font-size: 1.5rem; letter-spacing: 0.3em;">
+                <input type="text" class="form-control form-control-lg text-center" id="teacher_code"
+                    name="teacher_code" placeholder="예: 123456" maxlength="6" required
+                    style="font-size: 1.5rem; letter-spacing: 0.3em;">
                 <div class="form-text">
                     등록 시 발급받은 6자리 숫자 코드를 입력하세요
                 </div>
+            </div>
+
+            <div class="mb-4">
+                <label for="password" class="form-label">
+                    <i class="fas fa-lock me-2"></i>비밀번호
+                </label>
+                <input type="password" class="form-control form-control-lg" id="password" name="password"
+                    placeholder="비밀번호 입력" required>
             </div>
 
             <div class="d-grid mb-3">
@@ -82,9 +92,10 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // 숫자만 입력 허용
-        document.getElementById('teacher_code').addEventListener('input', function(e) {
+        document.getElementById('teacher_code').addEventListener('input', function (e) {
             this.value = this.value.replace(/[^0-9]/g, '');
         });
     </script>
 </body>
-</html> 
+
+</html>

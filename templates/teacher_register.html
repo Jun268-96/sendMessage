@@ -50,6 +50,25 @@
                 </div>
             </div>
 
+            <div class="mb-3">
+                <label for="password" class="form-label">
+                    <i class="fas fa-lock me-2"></i>비밀번호
+                </label>
+                <input type="password" class="form-control form-control-lg" id="password" 
+                       name="password" placeholder="4자 이상" required minlength="4">
+                <div class="form-text">
+                    로그인 시 사용할 비밀번호입니다. 4자 이상 입력해주세요.
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label for="password_confirm" class="form-label">
+                    <i class="fas fa-lock me-2"></i>비밀번호 확인
+                </label>
+                <input type="password" class="form-control form-control-lg" id="password_confirm" 
+                       name="password_confirm" placeholder="비밀번호 다시 입력" required minlength="4">
+            </div>
+
             <div class="d-grid mb-3">
                 <button type="submit" class="btn btn-primary btn-lg">
                     <i class="fas fa-user-plus me-2"></i>교사 코드 발급받기
