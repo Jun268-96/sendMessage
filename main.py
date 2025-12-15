@@ -182,6 +182,9 @@ def init_db():
             is_online BOOLEAN DEFAULT FALSE)'''
     )
 
+    # 서버 시작 시 학생 목록 초기화 (재시작하면 모든 연결이 끊기므로)
+    c.execute('DELETE FROM students')
+
     conn.commit()
     conn.close()
 
