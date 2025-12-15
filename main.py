@@ -307,12 +307,27 @@ def on_disconnect():
     elif request.sid in students:
         student_info = students[request.sid]
         teacher_code = student_info.get('teacher_code')
+        student_name = student_info.get('student_name')
         del students[request.sid]
+
+        # DB에서도 학생 레코드 삭제
+        if teacher_code and student_name:
+            try:
+                conn = get_db()
+                c = conn.cursor()
+                c.execute(
+                    'DELETE FROM students WHERE teacher_code = %s AND student_name = %s',
+                    (teacher_code, student_name)
+                )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f'학생 DB 삭제 오류: {e}')
 
         if teacher_code:
             teacher_room = f'teacher_{teacher_code}'
             socketio.emit('student_disconnected', student_info, room=teacher_room)
-            print(f"학생 연결 해제: {student_info.get('student_name')} -> 교사 {teacher_code}")
+            print(f"학생 연결 해제: {student_name} -> 교사 {teacher_code}")
 
 
 @socketio.on('teacher_join')
