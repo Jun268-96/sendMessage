@@ -17,7 +17,6 @@ const displayName = document.getElementById('displayName');
 const displayId = document.getElementById('displayId');
 const messageList = document.getElementById('messageList');
 const messageCount = document.getElementById('messageCount');
-const clearMessagesBtn = document.getElementById('clearMessagesBtn');
 const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
 const notificationSound = document.getElementById('notificationSound');
 const studentSendCard = document.getElementById('studentSendCard');
@@ -39,7 +38,6 @@ function initEvents() {
     studentNameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') connectToServer(); });
     teacherCodeInput.addEventListener('input', function () { this.value = this.value.replace(/[^0-9]/g, ''); });
 
-    clearMessagesBtn.addEventListener('click', clearAllMessages);
     refreshHistoryBtn.addEventListener('click', requestMessageHistory);
 
     sendToTeacherBtn.addEventListener('click', sendMessageToTeacher);
@@ -300,12 +298,7 @@ function addMessageToList(message) {
                 ${!message.isRead ? '<span class="badge bg-success ms-2">새 메시지</span>' : ''}
                 ${message.isFromHistory ? '<span class="badge bg-secondary ms-2">이전 메시지</span>' : ''}
             </div>
-            <div class="d-flex align-items-center gap-2">
-                <small class="text-muted">${escapeHtml(message.timestamp)}</small>
-                <button class="btn btn-sm btn-outline-danger delete-msg-btn" title="이 메시지 숨기기">
-                    <i class="fas fa-eye-slash"></i>
-                </button>
-            </div>
+            <small class="text-muted">${escapeHtml(message.timestamp)}</small>
         </div>
         <div class="message-content" style="word-break: break-word; line-height: 1.5;">${messageWithLinks}</div>
         <div class="text-end mt-2">
@@ -316,14 +309,6 @@ function addMessageToList(message) {
     messageElement.addEventListener('click', function () {
         if (!message.isRead) markMessageRead(message.id);
     });
-
-    const delBtn = messageElement.querySelector('.delete-msg-btn');
-    if (delBtn) {
-        delBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            hideMessage(message.id);
-        });
-    }
 
     messageList.appendChild(messageElement);
 }
