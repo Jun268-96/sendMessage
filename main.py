@@ -276,6 +276,47 @@ def teacher_login_post():
         return render_template('teacher_login.html', error=f'로그인 실패: {str(e)}')
 
 
+@app.route('/teacher/find-code')
+def teacher_find_code():
+    return render_template('teacher_find_code.html')
+
+
+@app.route('/teacher/find-code', methods=['POST'])
+def teacher_find_code_post():
+    teacher_name = request.form.get('teacher_name', '').strip()
+    password = request.form.get('password', '')
+
+    if not teacher_name:
+        return render_template('teacher_find_code.html', error='교사 이름을 입력해주세요.')
+    
+    if not password:
+        return render_template('teacher_find_code.html', error='비밀번호를 입력해주세요.')
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT teacher_code, password_hash FROM teachers WHERE teacher_name = %s', (teacher_name,))
+        teachers_found = c.fetchall()
+        conn.close()
+
+        if not teachers_found:
+            return render_template('teacher_find_code.html', error='해당 이름으로 등록된 교사가 없습니다.')
+
+        # 비밀번호가 일치하는 모든 코드 찾기
+        matching_codes = []
+        for teacher_code, password_hash in teachers_found:
+            if check_password_hash(password_hash, password):
+                matching_codes.append(teacher_code)
+
+        if matching_codes:
+            return render_template('teacher_find_code.html', codes=matching_codes)
+        else:
+            return render_template('teacher_find_code.html', error='비밀번호가 일치하지 않습니다.')
+
+    except Exception as e:
+        return render_template('teacher_find_code.html', error=f'코드 찾기 실패: {str(e)}')
+
+
 @app.route('/teacher')
 def teacher():
     teacher_code = session.get('teacher_code')

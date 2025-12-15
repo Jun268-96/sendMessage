@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>코드 찾기 - 메시지 전송 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .find-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .code-display {
+            font-size: 2rem;
+            font-weight: bold;
+            letter-spacing: 0.3em;
+            color: #667eea;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="find-card p-5">
+        <div class="text-center mb-4">
+            <i class="fas fa-search fa-3x text-primary mb-3"></i>
+            <h2 class="text-primary">교사 코드 찾기</h2>
+            <p class="text-muted">등록 시 입력한 이름과 비밀번호로 코드를 찾으세요</p>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>{{ error }}
+        </div>
+        {% endif %}
+
+        {% if codes %}
+        <div class="alert alert-success" role="alert">
+            <i class="fas fa-check-circle me-2"></i>코드를 찾았습니다!
+        </div>
+        <div class="mb-4">
+            {% for code in codes %}
+            <div class="code-display mb-2">{{ code }}</div>
+            {% endfor %}
+        </div>
+        <div class="d-grid">
+            <a href="/teacher/login" class="btn btn-primary btn-lg">
+                <i class="fas fa-sign-in-alt me-2"></i>로그인하러 가기
+            </a>
+        </div>
+        {% else %}
+        <form method="POST">
+            <div class="mb-3">
+                <label for="teacher_name" class="form-label">
+                    <i class="fas fa-user me-2"></i>교사 이름
+                </label>
+                <input type="text" class="form-control form-control-lg" id="teacher_name" name="teacher_name"
+                    placeholder="등록 시 입력한 이름" required>
+            </div>
+
+            <div class="mb-4">
+                <label for="password" class="form-label">
+                    <i class="fas fa-lock me-2"></i>비밀번호
+                </label>
+                <input type="password" class="form-control form-control-lg" id="password" name="password"
+                    placeholder="비밀번호 입력" required>
+            </div>
+
+            <div class="d-grid mb-3">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="fas fa-search me-2"></i>코드 찾기
+                </button>
+            </div>
+
+            <div class="text-center">
+                <hr>
+                <a href="/teacher/login" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>로그인으로 돌아가기
+                </a>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>
