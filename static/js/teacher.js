@@ -455,11 +455,23 @@ function renderSentPreview() {
             item.innerHTML = `
                 <div class="d-flex justify-content-between mb-2">
                     <strong>수신자: ${escapeHtml(msg.label)}</strong>
-                    <small class="text-muted">${escapeHtml(msg.timestamp)}</small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="text-muted">${escapeHtml(msg.timestamp)}</small>
+                        <button class="btn btn-sm btn-outline-danger delete-sent-btn" data-id="${msg.id}" title="삭제">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
                 </div>
                 <div style="word-break: break-word; line-height: 1.5;">${convertUrlsToLinks(escapeHtml(msg.message))}</div>
             `;
             messageHistoryDiv.appendChild(item);
+        });
+        // 삭제 버튼 이벤트 바인딩
+        messageHistoryDiv.querySelectorAll('.delete-sent-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                confirmDeleteMessage(btn.dataset.id);
+            });
         });
     }
     // 더보기 버튼
@@ -526,15 +538,28 @@ function openModal(title, items, isSent) {
             const senderLabel = isSent ? `수신자: ${escapeHtml(msg.label || '')}` : `${escapeHtml(msg.student_name || '학생')}`;
             const ts = escapeHtml(msg.timestamp || '');
             const body = escapeHtml(msg.message || '');
+            const deleteBtn = isSent ? `<button class="btn btn-sm btn-outline-danger delete-sent-btn ms-2" data-id="${msg.id}" title="삭제"><i class="fas fa-trash-alt"></i></button>` : '';
             return `
                 <div class="message-item mb-2">
                     <div class="d-flex justify-content-between mb-2">
                         <strong>${senderLabel}</strong>
-                        <small class="text-muted">${ts}</small>
+                        <div class="d-flex align-items-center gap-2">
+                            <small class="text-muted">${ts}</small>
+                            ${deleteBtn}
+                        </div>
                     </div>
                     <div style="word-break: break-word; line-height: 1.5;">${convertUrlsToLinks(body)}</div>
                 </div>`;
         }).join('');
+        // 삭제 버튼 이벤트 바인딩
+        if (isSent) {
+            modalBody.querySelectorAll('.delete-sent-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    confirmDeleteMessage(btn.dataset.id);
+                });
+            });
+        }
     }
     modalEl.show();
 }
@@ -554,4 +579,50 @@ function showNotification(message, type = 'info') {
     toastMessage.textContent = message;
     notificationToast.className = `toast ${bgClass[type] || 'bg-info'} text-white`;
     toast.show();
+}
+
+// 삭제 확인 모달
+let pendingDeleteMessageId = null;
+
+function confirmDeleteMessage(messageId) {
+    pendingDeleteMessageId = messageId;
+    // 확인 모달 생성
+    let confirmModal = document.getElementById('confirmDeleteModal');
+    if (!confirmModal) {
+        confirmModal = document.createElement('div');
+        confirmModal.id = 'confirmDeleteModal';
+        confirmModal.className = 'modal fade';
+        confirmModal.tabIndex = -1;
+        confirmModal.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>메시지 삭제</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>이 메시지를 정말 삭제하시겠습니까?</p>
+                        <p class="text-muted small mb-0">삭제된 메시지는 학생에게도 더 이상 표시되지 않으며, 복구할 수 없습니다.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                        <button type="button" class="btn btn-danger" id="confirmDeleteBtn">삭제</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(confirmModal);
+        document.getElementById('confirmDeleteBtn').addEventListener('click', executeDeleteMessage);
+    }
+    const bsModal = new bootstrap.Modal(confirmModal);
+    bsModal.show();
+}
+
+function executeDeleteMessage() {
+    if (pendingDeleteMessageId) {
+        socket.emit('delete_message_teacher', { message_id: pendingDeleteMessageId });
+        pendingDeleteMessageId = null;
+    }
+    const confirmModal = bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal'));
+    if (confirmModal) confirmModal.hide();
 }
