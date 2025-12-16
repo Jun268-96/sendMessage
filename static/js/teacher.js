@@ -478,12 +478,23 @@ function renderSentPreview() {
             });
         });
     }
-    // 더보기 버튼
+    // 더보기 버튼 + 일괄 삭제 버튼
+    const btnContainer = document.createElement('div');
+    btnContainer.className = 'd-flex gap-2 mt-2';
+
     const btn = document.createElement('button');
-    btn.className = 'btn btn-outline-primary btn-sm mt-2';
+    btn.className = 'btn btn-outline-primary btn-sm';
     btn.textContent = '더보기';
     btn.addEventListener('click', () => openModal('전송 기록', sentMessages, true));
-    messageHistoryDiv.appendChild(btn);
+    btnContainer.appendChild(btn);
+
+    const bulkBtn = document.createElement('button');
+    bulkBtn.className = 'btn btn-outline-danger btn-sm';
+    bulkBtn.innerHTML = '<i class="fas fa-trash-alt me-1"></i>일괄 삭제';
+    bulkBtn.addEventListener('click', openBulkDeleteModal);
+    btnContainer.appendChild(bulkBtn);
+
+    messageHistoryDiv.appendChild(btnContainer);
 }
 
 // 학생 → 교사: 프리뷰 3개 + 모달
@@ -630,3 +641,136 @@ function executeDeleteMessage() {
     const confirmModal = bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal'));
     if (confirmModal) confirmModal.hide();
 }
+
+// 일괄 삭제 모달
+function openBulkDeleteModal() {
+    let bulkModal = document.getElementById('bulkDeleteModal');
+    if (!bulkModal) {
+        bulkModal = document.createElement('div');
+        bulkModal.id = 'bulkDeleteModal';
+        bulkModal.className = 'modal fade';
+        bulkModal.tabIndex = -1;
+        bulkModal.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title"><i class="fas fa-trash-alt me-2"></i>메시지 일괄 삭제</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">삭제 대상 선택</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="bulkDeleteFilter" id="filterAll" value="all" checked>
+                                <label class="form-check-label" for="filterAll">전체 메시지 삭제</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="bulkDeleteFilter" id="filterRecipient" value="recipient">
+                                <label class="form-check-label" for="filterRecipient">특정 수신자</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="bulkDeleteFilter" id="filterDate" value="date_range">
+                                <label class="form-check-label" for="filterDate">기간 지정</label>
+                            </div>
+                        </div>
+                        <div id="recipientFilter" class="mb-3" style="display:none;">
+                            <label class="form-label">수신자 이름</label>
+                            <input type="text" class="form-control" id="bulkRecipientName" placeholder="학생 이름 입력">
+                        </div>
+                        <div id="dateFilter" class="mb-3" style="display:none;">
+                            <div class="row">
+                                <div class="col">
+                                    <label class="form-label">시작일</label>
+                                    <input type="date" class="form-control" id="bulkStartDate">
+                                </div>
+                                <div class="col">
+                                    <label class="form-label">종료일</label>
+                                    <input type="date" class="form-control" id="bulkEndDate">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="alert alert-warning" id="bulkDeletePreview">
+                            <i class="fas fa-info-circle me-2"></i>삭제할 메시지: <strong id="previewCount">0</strong>개
+                        </div>
+                        <p class="text-muted small mb-0"><i class="fas fa-exclamation-triangle me-1"></i>삭제된 메시지는 복구할 수 없습니다.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                        <button type="button" class="btn btn-danger" id="executeBulkDeleteBtn">삭제</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(bulkModal);
+
+        // 필터 변경 이벤트
+        bulkModal.querySelectorAll('input[name="bulkDeleteFilter"]').forEach(radio => {
+            radio.addEventListener('change', handleBulkFilterChange);
+        });
+        document.getElementById('bulkRecipientName').addEventListener('input', updateBulkDeletePreview);
+        document.getElementById('bulkStartDate').addEventListener('change', updateBulkDeletePreview);
+        document.getElementById('bulkEndDate').addEventListener('change', updateBulkDeletePreview);
+        document.getElementById('executeBulkDeleteBtn').addEventListener('click', executeBulkDelete);
+    }
+
+    // 초기화
+    document.getElementById('filterAll').checked = true;
+    document.getElementById('recipientFilter').style.display = 'none';
+    document.getElementById('dateFilter').style.display = 'none';
+    updateBulkDeletePreview();
+
+    const bsModal = new bootstrap.Modal(bulkModal);
+    bsModal.show();
+}
+
+function handleBulkFilterChange() {
+    const filterType = document.querySelector('input[name="bulkDeleteFilter"]:checked').value;
+    document.getElementById('recipientFilter').style.display = filterType === 'recipient' ? 'block' : 'none';
+    document.getElementById('dateFilter').style.display = filterType === 'date_range' ? 'block' : 'none';
+    updateBulkDeletePreview();
+}
+
+function updateBulkDeletePreview() {
+    const filterType = document.querySelector('input[name="bulkDeleteFilter"]:checked').value;
+    const data = { filter_type: filterType };
+
+    if (filterType === 'recipient') {
+        data.recipient_name = document.getElementById('bulkRecipientName').value;
+    } else if (filterType === 'date_range') {
+        data.start_date = document.getElementById('bulkStartDate').value;
+        data.end_date = document.getElementById('bulkEndDate').value;
+    }
+
+    socket.emit('get_bulk_delete_preview', data);
+}
+
+socket.on('bulk_delete_preview', function (data) {
+    const countEl = document.getElementById('previewCount');
+    if (countEl) countEl.textContent = data.count || 0;
+});
+
+function executeBulkDelete() {
+    const filterType = document.querySelector('input[name="bulkDeleteFilter"]:checked').value;
+    const data = { filter_type: filterType };
+
+    if (filterType === 'recipient') {
+        data.recipient_name = document.getElementById('bulkRecipientName').value;
+    } else if (filterType === 'date_range') {
+        data.start_date = document.getElementById('bulkStartDate').value;
+        data.end_date = document.getElementById('bulkEndDate').value;
+    }
+
+    socket.emit('bulk_delete_messages', data);
+}
+
+socket.on('bulk_delete_result', function (data) {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('bulkDeleteModal'));
+    if (modal) modal.hide();
+
+    if (data.status === 'success') {
+        showNotification(`${data.deleted_count}개의 메시지가 삭제되었습니다`, 'success');
+        requestSentMessages();
+    } else {
+        showNotification(data.message || '삭제 실패', 'warning');
+    }
+});

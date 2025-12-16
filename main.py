@@ -761,6 +761,130 @@ def delete_message_teacher(data):
             conn.close()
 
 
+@socketio.on('bulk_delete_messages')
+def bulk_delete_messages(data):
+    """메시지 일괄 삭제: 전체, 특정 수신자, 기간 필터"""
+    teacher_info = teachers.get(request.sid)
+    if not teacher_info:
+        emit('bulk_delete_result', {'status': 'error', 'message': '교사 인증에 실패했습니다.'})
+        return
+
+    teacher_code = teacher_info.get('teacher_code')
+    filter_type = data.get('filter_type')  # 'all', 'recipient', 'date_range'
+
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+
+        # 기본 조건: 해당 교사가 보낸 메시지
+        base_query = "DELETE FROM messages WHERE teacher_code = %s AND sender_type = 'teacher'"
+        count_query = "SELECT COUNT(*) FROM messages WHERE teacher_code = %s AND sender_type = 'teacher'"
+        params = [teacher_code]
+
+        if filter_type == 'recipient':
+            recipient_name = data.get('recipient_name', '')
+            if recipient_name:
+                base_query += " AND (recipient_id = %s OR recipient_id LIKE %s)"
+                count_query += " AND (recipient_id = %s OR recipient_id LIKE %s)"
+                params.extend([recipient_name, f'%{recipient_name}%'])
+        elif filter_type == 'date_range':
+            start_date = data.get('start_date')
+            end_date = data.get('end_date')
+            if start_date:
+                base_query += " AND timestamp >= %s"
+                count_query += " AND timestamp >= %s"
+                params.append(start_date)
+            if end_date:
+                base_query += " AND timestamp <= %s"
+                count_query += " AND timestamp <= %s"
+                params.append(end_date + ' 23:59:59')
+
+        # 삭제할 메시지 ID 목록 가져오기 (학생에게 알리기 위해)
+        id_query = count_query.replace("SELECT COUNT(*)", "SELECT id")
+        c.execute(id_query, params)
+        message_ids = [row[0] for row in c.fetchall()]
+
+        # 삭제 전 개수 확인
+        c.execute(count_query, params)
+        count = c.fetchone()[0]
+
+        if count == 0:
+            emit('bulk_delete_result', {'status': 'error', 'message': '삭제할 메시지가 없습니다.'})
+            return
+
+        # 메시지 삭제
+        c.execute(base_query, params)
+        
+        # 관련 hidden_messages도 삭제
+        if message_ids:
+            c.execute(
+                "DELETE FROM hidden_messages WHERE message_id = ANY(%s)",
+                (message_ids,)
+            )
+
+        conn.commit()
+
+        # 학생들에게 삭제 알림
+        student_room = f'students_{teacher_code}'
+        for mid in message_ids:
+            socketio.emit('message_deleted', {'message_id': mid}, room=student_room)
+
+        emit('bulk_delete_result', {'status': 'success', 'deleted_count': count})
+
+    except Exception as e:
+        print(f'메시지 일괄 삭제 오류: {e}')
+        emit('bulk_delete_result', {'status': 'error', 'message': f'삭제 중 오류: {str(e)}'})
+    finally:
+        if conn:
+            conn.close()
+
+
+@socketio.on('get_bulk_delete_preview')
+def get_bulk_delete_preview(data):
+    """삭제할 메시지 개수 미리보기"""
+    teacher_info = teachers.get(request.sid)
+    if not teacher_info:
+        emit('bulk_delete_preview', {'count': 0})
+        return
+
+    teacher_code = teacher_info.get('teacher_code')
+    filter_type = data.get('filter_type')
+
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+
+        count_query = "SELECT COUNT(*) FROM messages WHERE teacher_code = %s AND sender_type = 'teacher'"
+        params = [teacher_code]
+
+        if filter_type == 'recipient':
+            recipient_name = data.get('recipient_name', '')
+            if recipient_name:
+                count_query += " AND (recipient_id = %s OR recipient_id LIKE %s)"
+                params.extend([recipient_name, f'%{recipient_name}%'])
+        elif filter_type == 'date_range':
+            start_date = data.get('start_date')
+            end_date = data.get('end_date')
+            if start_date:
+                count_query += " AND timestamp >= %s"
+                params.append(start_date)
+            if end_date:
+                count_query += " AND timestamp <= %s"
+                params.append(end_date + ' 23:59:59')
+
+        c.execute(count_query, params)
+        count = c.fetchone()[0]
+        emit('bulk_delete_preview', {'count': count})
+
+    except Exception as e:
+        print(f'미리보기 오류: {e}')
+        emit('bulk_delete_preview', {'count': 0})
+    finally:
+        if conn:
+            conn.close()
+
 @socketio.on('teacher_toggle_receive')
 def teacher_toggle_receive(data):
     teacher_info = teachers.get(request.sid)
