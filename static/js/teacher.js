@@ -387,7 +387,8 @@ function sendMessage() {
             if (info) recipientNames.push(info.student_name);
         });
     } else {
-        showNotification('수신자를 선택해주세요', 'warning');
+        // 수신자 미선택 시 이름 입력 모달 표시
+        openManualRecipientModal(message);
         return;
     }
     lastSentNames = recipientNames.slice();
@@ -398,6 +399,63 @@ function sendMessage() {
         message: message,
         recipients: recipients
     });
+}
+
+// 수동 수신자 입력 모달
+function openManualRecipientModal(message) {
+    let modal = document.getElementById('manualRecipientModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'manualRecipientModal';
+        modal.className = 'modal fade';
+        modal.tabIndex = -1;
+        modal.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title"><i class="fas fa-user-edit me-2"></i>수신자 직접 입력</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-muted small">접속하지 않은 학생에게도 메시지를 보낼 수 있습니다.<br>해당 이름의 학생이 접속하면 메시지를 받습니다.</p>
+                        <div class="mb-3">
+                            <label class="form-label">수신자 이름</label>
+                            <input type="text" class="form-control" id="manualRecipientName" placeholder="학생 이름 입력">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                        <button type="button" class="btn btn-primary" id="sendToManualRecipientBtn">전송</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('sendToManualRecipientBtn').addEventListener('click', function () {
+            const recipientName = document.getElementById('manualRecipientName').value.trim();
+            if (!recipientName) {
+                showNotification('수신자 이름을 입력해주세요', 'warning');
+                return;
+            }
+            const pendingMessage = modal.dataset.pendingMessage;
+            lastSentNames = [recipientName];
+            lastSentAll = false;
+            socket.emit('send_message', {
+                sender_type: 'teacher',
+                teacher_code: window.teacherCode,
+                message: pendingMessage,
+                recipients: [recipientName],
+                is_manual_recipient: true
+            });
+            bootstrap.Modal.getInstance(modal).hide();
+            document.getElementById('manualRecipientName').value = '';
+        });
+    }
+    modal.dataset.pendingMessage = message;
+    document.getElementById('manualRecipientName').value = '';
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
 }
 
 // 학생 강퇴

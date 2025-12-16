@@ -573,6 +573,7 @@ def on_send_message(data):
     message = data.get('message')
     recipients = data.get('recipients', [])
     teacher_code = data.get('teacher_code')
+    is_manual_recipient = data.get('is_manual_recipient', False)
 
     if sender_type == 'teacher' and teacher_code:
         student_room = f'students_{teacher_code}'
@@ -591,6 +592,24 @@ def on_send_message(data):
                     },
                     room=student_room
                 )
+        elif is_manual_recipient:
+            # 수동 입력된 수신자 이름 처리 (오프라인 학생용)
+            recipient_names = recipients  # 이미 이름 리스트임
+            msg_id = save_message_multi_teacher(teacher_code, 'teacher', 'student', recipient_names, message)
+            
+            # 해당 이름의 학생이 현재 접속 중이면 실시간 전송
+            for sid, info in students.items():
+                if info.get('teacher_code') == teacher_code and info.get('student_name') in recipient_names:
+                    socketio.emit(
+                        'receive_message',
+                        {
+                            'message_id': msg_id,
+                            'message': message,
+                            'sender': '교사',
+                            'timestamp': now_kst_str()
+                        },
+                        room=sid
+                    )
         else:
             for student_socket_id in recipients:
                 info = students.get(student_socket_id)
