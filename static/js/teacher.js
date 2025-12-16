@@ -231,7 +231,11 @@ function updateStudentList(students) {
         `;
     } else {
         studentList.innerHTML = '';
-        students.forEach(addStudentToList);
+        // 한글 가나다순 정렬
+        const sortedStudents = [...students].sort((a, b) =>
+            a.student_name.localeCompare(b.student_name, 'ko-KR')
+        );
+        sortedStudents.forEach(addStudentToList);
     }
     updateStudentCount();
 }
