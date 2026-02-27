@@ -5,6 +5,7 @@ from flask import Flask, render_template, request, session
 from flask_socketio import SocketIO, emit, join_room, disconnect
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
+import time
 import random
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -28,7 +29,18 @@ def get_db():
         raise RuntimeError('DATABASE_URL is not set. Please configure DATABASE_URL for Postgres.')
     # sslmode can be configured via DB_SSLMODE if needed (e.g., require on Render)
     sslmode = os.environ.get('DB_SSLMODE', 'prefer')
-    return psycopg.connect(db_url, sslmode=sslmode)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return psycopg.connect(db_url, sslmode=sslmode)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[DB 연결 에러] 일시적 오류 발생. 재시도 {attempt+1}/{max_retries}... ({e})")
+                time.sleep(1)
+            else:
+                print(f"[DB 연결 실패] 서버와 연결할 수 없습니다: {e}")
+                raise
 
 
 def now_kst_str():
