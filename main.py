@@ -9,7 +9,7 @@ import time
 import random
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-import psycopg
+import psycopg2 as psycopg
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-fallback-key-change-in-production')
