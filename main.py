@@ -1018,7 +1018,10 @@ def get_sent_messages(data):
 
 
 # 앱 시작 시 DB 초기화 (프로덕션/로컬 모두 실행)
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"[경고] DB 초기화 실패, 서버는 계속 실행됩니다: {e}")
 
 if __name__ == '__main__':
     print("서버 시작...")
